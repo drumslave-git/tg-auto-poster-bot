@@ -14,6 +14,17 @@ import { detectContentType } from './capture.js';
  */
 export const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
 
+/**
+ * Room kept aside for the audio stream when video and audio are downloaded
+ * separately and merged.
+ *
+ * Each stream is filtered on its own, so a video picked right up against the
+ * ceiling would produce a merged file over it. Audio is a rounding error next
+ * to video — a few MB for anything short enough to send at all — so spending a
+ * little of the budget up front is cheaper than downloading and then refusing.
+ */
+const AUDIO_BUDGET_BYTES = 6 * 1024 * 1024;
+
 /** Generous enough for 50 MB on a slow line, short enough not to hang a queue. */
 const TIMEOUT_MS = 5 * 60_000;
 
@@ -151,6 +162,7 @@ export function parseMetadata(stdout: string): Metadata {
 
 export function buildYtDlpArgs(url: string, outputTemplate: string): string[] {
   const limit = String(MAX_DOWNLOAD_BYTES);
+  const videoLimit = String(MAX_DOWNLOAD_BYTES - AUDIO_BUDGET_BYTES);
 
   return [
     // A link to a video inside a playlist means that video, not the playlist…
@@ -169,25 +181,26 @@ export function buildYtDlpArgs(url: string, outputTemplate: string): string[] {
     '30',
     '--retries',
     '3',
-    // Skips media whose advertised size is over the limit before spending any
-    // bandwidth on it. The file on disk is measured again afterwards, because
-    // plenty of sites report no size at all.
-    //
-    // The `B` suffix is deliberate: --max-filesize wants a unit (a bare number
-    // is ignored) and reads a bare `M` as 10⁶, so only `B` is exact. Format
-    // filters below use a different parser that takes plain bytes and rejects
-    // a `B` suffix — hence the two spellings of the same number.
+    // Skips a stream whose advertised size is over the limit before spending
+    // any bandwidth on it. The file on disk is measured again afterwards,
+    // because plenty of sites report no size at all. Plain bytes, no unit:
+    // --max-filesize rejects a `B` suffix, and reads a bare `M` as 10⁶.
     '--max-filesize',
-    `${limit}B`,
-    // Prefer a single file that already fits. `?` goes right after the operator
-    // and keeps formats whose size the site does not report, which would
-    // otherwise all be filtered out.
+    limit,
+    // Video and audio as separate streams first. Sites that serve DASH — most
+    // of YouTube — offer only a low-resolution muxed file, so asking for one
+    // ready-made file first would quietly settle for 360p while the 1080p
+    // streams fit the budget with room to spare. `?` goes right after the
+    // operator and keeps formats whose size the site does not report, which
+    // would otherwise all be filtered out.
     '-f',
-    `b[filesize<=?${limit}]/bv*[filesize<=?${limit}]+ba/b`,
+    `bv*[filesize<=?${videoLimit}]+ba/b[filesize<=?${limit}]/b`,
     // 1080p h264 in an mp4 is what Telegram plays inline everywhere; `res:1080`
-    // prefers the largest format no larger than that.
+    // prefers the largest format no larger than that. Audio is spelled out too:
+    // left to itself yt-dlp ranks opus above aac, which does not go into an mp4
+    // and drops the merge into an mkv Telegram will not play inline.
     '-S',
-    'res:1080,codec:h264',
+    'res:1080,vcodec:h264,acodec:aac',
     '--merge-output-format',
     'mp4',
     '--print',

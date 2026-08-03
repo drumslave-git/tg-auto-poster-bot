@@ -42,7 +42,15 @@ ENV PATH="/app/bin:$PATH"
 # ffmpeg merges the separate video and audio streams most sites serve into one
 # mp4; python3 runs the yt-dlp zipapp below. Neither one self-updates — they
 # move forward when this image is rebuilt.
-RUN apk add --no-cache ffmpeg python3
+#
+# deno solves YouTube's JavaScript challenge. Without a runtime yt-dlp falls
+# back to clients that need no challenge, which it now calls deprecated and
+# which already return an incomplete format list. It is the largest thing in
+# this image by some way, and node — already here, and also supported — would
+# cost nothing; deno is still the right one, because the script being run comes
+# from YouTube and deno is the only one of the two that will not hand it the
+# filesystem and the network.
+RUN apk add --no-cache ffmpeg python3 deno
 
 # Deliberately the official zipapp rather than the apk package: a
 # package-managed yt-dlp refuses to update itself, and extractors break often

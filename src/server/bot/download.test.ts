@@ -161,15 +161,34 @@ describe('parseMetadata', () => {
 describe('buildYtDlpArgs', () => {
   const args = buildYtDlpArgs('https://example.com/clip', '/tmp/x/media.%(ext)s');
 
-  it('caps the size at what a bot may upload, in a unit yt-dlp reads exactly', () => {
-    expect(args[args.indexOf('--max-filesize') + 1]).toBe(`${MAX_DOWNLOAD_BYTES}B`);
+  it('caps the size at what a bot may upload, in plain bytes', () => {
+    // A `B` suffix is a usage error, and a bare `M` would mean 10⁶.
+    expect(args[args.indexOf('--max-filesize') + 1]).toBe(String(MAX_DOWNLOAD_BYTES));
+  });
+
+  it('takes separate streams before a ready-made file', () => {
+    // Otherwise a DASH site hands over its muxed 360p and the rest is ignored.
+    const format = args[args.indexOf('-f') + 1]!;
+    expect(format.indexOf('bv*')).toBeLessThan(format.indexOf('/b['));
+  });
+
+  it('leaves the merge room for the audio stream', () => {
+    const format = args[args.indexOf('-f') + 1]!;
+    const videoLimit = Number(/bv\*\[filesize<=\?(\d+)\]/.exec(format)?.[1]);
+    expect(videoLimit).toBeGreaterThan(0);
+    expect(videoLimit).toBeLessThan(MAX_DOWNLOAD_BYTES);
   });
 
   it('keeps formats whose size the site does not report', () => {
     // `?` belongs after the operator — `filesize<=1000?` is a parse error.
     const format = args[args.indexOf('-f') + 1]!;
-    expect(format).toContain(`filesize<=?${MAX_DOWNLOAD_BYTES}`);
+    expect(format).toContain('filesize<=?');
     expect(format).not.toMatch(/\d\?/);
+  });
+
+  it('asks for codecs that survive the merge into an mp4', () => {
+    expect(args[args.indexOf('-S') + 1]).toBe('res:1080,vcodec:h264,acodec:aac');
+    expect(args[args.indexOf('--merge-output-format') + 1]).toBe('mp4');
   });
 
   it('never expands a link into a whole playlist', () => {
