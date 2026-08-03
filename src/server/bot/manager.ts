@@ -2,6 +2,7 @@ import { Bot, GrammyError, HttpError } from 'grammy';
 import type { UserFromGetMe } from 'grammy/types';
 import { notifyDashboard } from '../events.js';
 import { clearAlbumBuffers } from './albumBuffer.js';
+import { forgetCommandMenus, syncCommandMenu } from './commands.js';
 import { registerHandlers } from './handlers.js';
 
 export type BotStatus = 'stopped' | 'starting' | 'running' | 'error';
@@ -84,6 +85,12 @@ class BotManager {
     console.log(`[bot] running as @${bot.botInfo.username}`);
     notifyDashboard();
 
+    // The menu is Telegram-side state, not ours; publishing it must not hold up
+    // polling, and a failure only costs the ☰ button its contents.
+    void syncCommandMenu(bot.api).catch((error) =>
+      console.warn('[bot] command menu not published:', describeError(error)),
+    );
+
     // start() resolves only once the bot stops; deliberately not awaited.
     void bot.start({ allowed_updates: [...ALLOWED_UPDATES] }).catch((error) => {
       this.status = 'error';
@@ -95,6 +102,7 @@ class BotManager {
 
   private async stopInternal(): Promise<void> {
     clearAlbumBuffers();
+    forgetCommandMenus();
     const bot = this.bot;
     this.bot = null;
     this.info = null;

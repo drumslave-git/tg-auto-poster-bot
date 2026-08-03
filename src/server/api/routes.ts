@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { syncCommandMenu } from '../bot/commands.js';
 import { botManager } from '../bot/manager.js';
 import { upsertChannel } from '../services/channels.js';
 import { postNext, syncQueueHead } from '../services/poster.js';
@@ -181,6 +182,12 @@ api.put('/settings', async (req, res) => {
 
 // --- Users ------------------------------------------------------------------
 
+/** A menu is per-user, so who is on the list — and as what — decides it. */
+async function syncMenus(): Promise<void> {
+  const botApi = botManager.getApi();
+  if (botApi) await syncCommandMenu(botApi);
+}
+
 api.get('/users', async (_req, res) => {
   res.json({ users: await usersWithProfiles() });
 });
@@ -206,6 +213,7 @@ api.post('/users', async (req, res) => {
   const profile = await resolveProfile(telegramId);
   const label = profile?.username ? `@${profile.username}` : (profile?.firstName ?? null);
   addUser(telegramId, role, label);
+  await syncMenus();
 
   res.json({ ok: true, users: await usersWithProfiles() });
 });
@@ -230,6 +238,7 @@ api.patch('/users/:telegramId', async (req, res) => {
   }
 
   setRole(telegramId, role);
+  await syncMenus();
   res.json({ ok: true, users: await usersWithProfiles() });
 });
 
@@ -248,6 +257,7 @@ api.delete('/users/:telegramId', async (req, res) => {
 
   removeUser(telegramId);
   forgetProfile(telegramId);
+  await syncMenus();
   res.json({ ok: true, users: await usersWithProfiles() });
 });
 

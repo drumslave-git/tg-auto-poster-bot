@@ -92,6 +92,13 @@ thing standing between you and a bot nobody can configure.
 Any non-command message is queued, and the bot replies with the new queue size. Use
 `/till` or `/summary` for the schedule.
 
+The same list is published to Telegram as the bot's ☰ menu, so the commands are one
+tap away and autocomplete as you type. Each person sees only what their role can use:
+an admin's menu carries all nine, a manager's carries the four they may run. Strangers
+see just `/start` and `/help`. The menu is set when the bot starts and again whenever
+you add, promote or remove someone in the dashboard — someone added before they ever
+opened the bot gets theirs the first time they write.
+
 ## Links become media
 
 Send a link and the link is not what gets queued — the media behind it is. The bot hands
@@ -388,7 +395,7 @@ an ephemeral port.
 ```
 src/server
   api/          Express routes, dashboard auth, snapshot + SSE stream
-  bot/          grammY bot: lifecycle, handlers, album buffer, yt-dlp, scheduler
+  bot/          grammY bot: lifecycle, handlers, command menu, album buffer, yt-dlp, scheduler
   db/           Drizzle schema and connection
   services/     settings, users/roles, queue, channels, posting, media tools
   test/         scratch-database helpers for the test suite

@@ -21,6 +21,7 @@ import {
 } from '../util/format.js';
 import { bufferAlbumMessage } from './albumBuffer.js';
 import { captureText, describe } from './capture.js';
+import { ensureCommandMenu, helpLinesFor } from './commands.js';
 import {
   MAX_DOWNLOAD_BYTES,
   type Download,
@@ -36,24 +37,12 @@ const INTRO = [
     'it becomes the caption.',
 ].join('\n');
 
-const SHARED_COMMANDS = [
-  '/queue — how many posts are waiting',
-  '/till — time until the next automatic post',
-  '/summary — queue size, next post time, total runway',
-];
-
 const ADMIN_HELP = [
   '<b>Auto-poster commands</b>',
   '',
   INTRO,
   '',
-  ...SHARED_COMMANDS,
-  '/delay N — set the delay between posts to N minutes',
-  '/post — publish the next item right now',
-  '/pause — stop automatic posting',
-  '/resume — start automatic posting again',
-  '/clear — empty the queue',
-  '/help — this message',
+  ...helpLinesFor('admin'),
 ].join('\n');
 
 const MANAGER_HELP = [
@@ -61,8 +50,7 @@ const MANAGER_HELP = [
   '',
   INTRO,
   '',
-  ...SHARED_COMMANDS,
-  '/help — this message',
+  ...helpLinesFor('manager'),
   '',
   'You are a manager: you can add posts and check the schedule. Changing the ' +
     'delay, publishing early, pausing and clearing the queue are admin-only.',
@@ -453,6 +441,9 @@ async function guard(ctx: Context, need: 'any' | 'admin' = 'any'): Promise<boole
   // Free name refresh: the dashboard shows this without calling getChat.
   const label = from?.username ? `@${from.username}` : (from?.first_name ?? null);
   if (label && label !== user.label) setLabel(user.telegramId, label);
+
+  // Their chat exists now, so a menu that could not be set earlier can be.
+  void ensureCommandMenu(ctx.api, user.telegramId, user.role);
 
   if (need === 'admin' && user.role !== 'admin') {
     await ctx.reply('That command is admin-only. You can still send me posts for the queue.');
