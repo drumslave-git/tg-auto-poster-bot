@@ -47,6 +47,8 @@ export type PostRecord = PostBase & {
 };
 
 export type Status = {
+  /** The running release, from the server's package.json. */
+  version: string;
   serverTime: string;
   authRequired: boolean;
   bot: {

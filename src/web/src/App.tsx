@@ -209,7 +209,8 @@ export default function App() {
       <ToolsPanel status={status} onChanged={() => void refresh()} />
 
       <footer className="pb-6 text-center text-xs text-slate-600">
-        Server time {formatDateTime(status.serverTime, settings.timezone)} · {settings.timezone}
+        v{status.version} · Server time {formatDateTime(status.serverTime, settings.timezone)} ·{' '}
+        {settings.timezone}
       </footer>
     </div>
   );

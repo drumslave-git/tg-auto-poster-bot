@@ -56,6 +56,7 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 # Migrations are applied at boot, resolved against the working directory.
 COPY drizzle ./drizzle
+# Also read at boot: the version the dashboard shows comes from here.
 COPY package.json ./
 
 # Pre-create the data directory so a named volume is writable by the non-root

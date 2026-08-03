@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,6 +20,16 @@ describe('paths', () => {
 
     expect(env.databasePath).toBe(path.resolve(process.cwd(), 'data/app.db'));
     expect(env.webDist).toBe(path.resolve(process.cwd(), 'dist/web'));
+  });
+});
+
+describe('version', () => {
+  it('reports the version from package.json', async () => {
+    const { version } = JSON.parse(
+      await readFile(path.resolve(process.cwd(), 'package.json'), 'utf8'),
+    ) as { version: string };
+
+    expect((await loadEnv()).version).toBe(version);
   });
 });
 

@@ -1,7 +1,23 @@
 import 'dotenv/config';
+import fs from 'node:fs';
 import path from 'node:path';
 
 const cwd = process.cwd();
+
+/**
+ * The running release, read from package.json rather than imported: the build
+ * is rooted at `src/`, so the file sits outside what tsc will compile. Never
+ * throws — an unreadable package.json is not worth refusing to boot over.
+ */
+function readVersion(): string {
+  try {
+    const raw = fs.readFileSync(path.resolve(cwd, 'package.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === 'string' && parsed.version ? parsed.version : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
 
 /** `123, 456` → `['123', '456']`. Blank entries are dropped. */
 function idList(...values: (string | undefined)[]): string[] {
@@ -13,6 +29,7 @@ function idList(...values: (string | undefined)[]): string[] {
 }
 
 export const env = {
+  version: readVersion(),
   port: Number(process.env.PORT ?? 3000),
   /** Always alongside the app; mount `data/` to keep it across redeploys. */
   databasePath: path.resolve(cwd, 'data/app.db'),

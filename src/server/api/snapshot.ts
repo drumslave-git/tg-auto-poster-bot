@@ -1,5 +1,6 @@
 import { botManager } from '../bot/manager.js';
 import { schedulerState } from '../bot/scheduler.js';
+import { env } from '../env.js';
 import { listChannels } from '../services/channels.js';
 import { getSchedule } from '../services/poster.js';
 import { usersWithProfiles } from '../services/profiles.js';
@@ -28,6 +29,7 @@ export async function buildSnapshot() {
   const tools = toolsState();
 
   return {
+    version: env.version,
     serverTime: new Date().toISOString(),
     authRequired: authRequired(),
     bot: {
