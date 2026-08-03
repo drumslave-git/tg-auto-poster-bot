@@ -8,7 +8,6 @@ import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 export const settings = sqliteTable('settings', {
   id: integer('id').primaryKey(),
   botToken: text('bot_token'),
-  adminId: text('admin_id'),
   targetChannelId: text('target_channel_id'),
   delayMinutes: integer('delay_minutes').notNull().default(60),
   timezone: text('timezone').notNull().default('UTC'),
@@ -16,6 +15,23 @@ export const settings = sqliteTable('settings', {
     .notNull()
     .$defaultFn(() => new Date()),
 });
+
+/**
+ * Everyone allowed to talk to the bot. `admin` may do everything; `manager`
+ * may only add posts to the queue. There can be any number of each, but the
+ * app refuses to delete the last admin — that would lock the bot out.
+ */
+export const users = sqliteTable('users', {
+  telegramId: text('telegram_id').primaryKey(),
+  role: text('role').$type<Role>().notNull().default('manager'),
+  /** Cached @username or first name, so the dashboard can show a name offline. */
+  label: text('label'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type Role = 'admin' | 'manager';
 
 /** Channels the bot has been added to, discovered from `my_chat_member` updates. */
 export const channels = sqliteTable('channels', {
@@ -66,6 +82,7 @@ export const posts = sqliteTable('posts', {
 });
 
 export type Settings = typeof settings.$inferSelect;
+export type User = typeof users.$inferSelect;
 export type Channel = typeof channels.$inferSelect;
 export type QueueItem = typeof queueItems.$inferSelect;
 export type Post = typeof posts.$inferSelect;

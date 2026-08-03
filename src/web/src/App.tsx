@@ -5,11 +5,16 @@ import { Countdown } from './components/Countdown';
 import { PasswordGate } from './components/PasswordGate';
 import { QueuePanel } from './components/QueuePanel';
 import { SettingsPanel } from './components/SettingsPanel';
+import { UsersPanel } from './components/UsersPanel';
 import { Badge, Stat } from './components/ui';
 import { formatDateTime, formatRunway } from './format';
 import type { BotStatus, Status } from './types';
 
 const POLL_MS = 5000;
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
 
 const BOT_TONE: Record<BotStatus, 'green' | 'amber' | 'red' | 'slate'> = {
   running: 'green',
@@ -56,10 +61,9 @@ export default function App() {
     );
   }
 
-  const { bot, admin, stats, settings, scheduler } = status;
-  const adminLabel = admin
-    ? (admin.username ? `@${admin.username}` : (admin.firstName ?? admin.id))
-    : 'not set';
+  const { bot, users, stats, settings, scheduler } = status;
+  const adminCount = users.filter((user) => user.role === 'admin').length;
+  const managerCount = users.length - adminCount;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
@@ -104,7 +108,15 @@ export default function App() {
           value={bot.username ? `@${bot.username}` : '—'}
           hint={bot.firstName ?? (settings.hasToken ? 'token set' : 'no token')}
         />
-        <Stat label="Admin" value={adminLabel} hint={admin ? `id ${admin.id}` : 'set an admin id'} />
+        <Stat
+          label="People"
+          value={users.length}
+          hint={
+            users.length === 0
+              ? 'add an admin below'
+              : `${plural(adminCount, 'admin')} · ${plural(managerCount, 'manager')}`
+          }
+        />
         <Stat
           label="In queue"
           value={stats.queueCount}
@@ -138,6 +150,7 @@ export default function App() {
 
       <QueuePanel status={status} refreshToken={tick} onChanged={() => void refresh()} />
       <SettingsPanel status={status} onSaved={() => void refresh()} />
+      <UsersPanel status={status} onChanged={() => void refresh()} />
       <ChannelsPanel status={status} onChanged={() => void refresh()} />
 
       <footer className="pb-6 text-center text-xs text-slate-600">

@@ -40,28 +40,49 @@ npm start
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
 2. Paste the token into **Configuration → Bot token** in the dashboard and save. The bot
    restarts automatically.
-3. Message the bot on Telegram. It replies with your numeric user ID — paste it into
-   **Admin user ID** and save. From then on only that user may talk to the bot.
+3. Message the bot on Telegram. It replies with your numeric user ID — add it under
+   **People** as an **admin** and save. From then on only listed users may talk to the bot.
 4. Add the bot to your channel as an **administrator with “Post messages”**. The channel
    appears in the dashboard on its own. If the bot was already in the channel before it
    was configured, register it with the **Add** field (`@channelname` or `-100…`).
 5. Set the delay and time zone, then start sending posts to the bot.
 
-`BOT_TOKEN`, `ADMIN_ID` and `TZ_NAME` in `.env` are optional shortcuts — they seed the
-database the first time it is created, and are ignored afterwards. The dashboard is the
-source of truth.
+`BOT_TOKEN`, `ADMIN_IDS`, `MANAGER_IDS` and `TZ_NAME` in `.env` are optional shortcuts —
+they seed the database the first time it is created, and are ignored afterwards. The
+dashboard is the source of truth.
 
-## Bot commands (admin only)
+## People and roles
 
-| Command | What it does |
-| --- | --- |
-| `/delay N` | Set the delay between posts to N minutes |
-| `/queue` | How many posts are waiting |
-| `/post` | Publish the next queued item immediately |
-| `/till` | Time until the next automatic post |
-| `/clear` | Empty the queue |
-| `/summary` | Queue size, next post time, and total runway (queue × delay) |
-| `/help` | Command list |
+Any number of people may use the bot, in one of two roles. Manage them under **People** in
+the dashboard: add a numeric Telegram user ID, change a role, or remove someone. Anyone not
+on the list is ignored silently.
+
+| | Admin | Manager |
+| --- | --- | --- |
+| Send posts to the queue | ✅ | ✅ |
+| `/queue`, `/till`, `/summary`, `/help` | ✅ | ✅ |
+| `/delay`, `/post`, `/clear` | ✅ | — |
+| Dashboard | ✅ | — |
+
+Managers are for people who should only feed the queue: they can add content and see when
+it goes out, but cannot change the delay, publish early, or empty the queue. The dashboard
+itself has no per-user login — it is gated by `DASHBOARD_PASSWORD` and is admin territory,
+so don't hand the password to a manager.
+
+The last admin cannot be removed or demoted; promote someone else first. That is the only
+thing standing between you and a bot nobody can configure.
+
+## Bot commands
+
+| Command | What it does | Role |
+| --- | --- | --- |
+| `/delay N` | Set the delay between posts to N minutes | admin |
+| `/queue` | How many posts are waiting | any |
+| `/post` | Publish the next queued item immediately | admin |
+| `/till` | Time until the next automatic post | any |
+| `/clear` | Empty the queue | admin |
+| `/summary` | Queue size, next post time, and total runway (queue × delay) | any |
+| `/help` | Command list for your role | any |
 
 Any non-command message is queued, and the bot replies with the new queue size and the
 time until the next post.
@@ -106,7 +127,7 @@ src/server
   api/          Express routes + dashboard auth
   bot/          grammY bot: lifecycle, handlers, album buffer, scheduler
   db/           Drizzle schema and connection
-  services/     settings, queue, channels, posting logic
+  services/     settings, users/roles, queue, channels, posting logic
 src/web         React dashboard (Vite root)
 drizzle/        generated SQL migrations, applied at boot
 ```

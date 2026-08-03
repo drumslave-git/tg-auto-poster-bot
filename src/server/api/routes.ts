@@ -20,6 +20,16 @@ import {
   updateSettings,
   type SettingsPatch,
 } from '../services/settings.js';
+import {
+  ROLES,
+  addUser,
+  blocksLastAdmin,
+  getUser,
+  isRole,
+  listUsers,
+  removeUser,
+  setRole,
+} from '../services/users.js';
 import { authRequired } from './auth.js';
 
 export const api = Router();
@@ -30,32 +40,45 @@ function maskToken(token: string | null): string | null {
   return `${id ?? ''}:${'•'.repeat(8)}${token.slice(-4)}`;
 }
 
-/** getChat is a network call; the admin's profile barely changes. */
-const adminCache = { id: '', at: 0, value: null as { username?: string; firstName?: string } | null };
-const ADMIN_TTL_MS = 5 * 60_000;
+/** getChat is a network call; these profiles barely change. */
+type Profile = { username?: string; firstName?: string } | null;
+const profileCache = new Map<string, { at: number; value: Profile }>();
+const PROFILE_TTL_MS = 5 * 60_000;
 
-async function resolveAdmin(adminId: string | null) {
-  if (!adminId) return null;
+async function resolveProfile(telegramId: string): Promise<Profile> {
+  const cached = profileCache.get(telegramId);
+  if (cached && Date.now() - cached.at < PROFILE_TTL_MS) return cached.value;
+
   const api = botManager.getApi();
-  if (!api) return null;
-  if (adminCache.id === adminId && Date.now() - adminCache.at < ADMIN_TTL_MS) return adminCache.value;
+  if (!api) return cached?.value ?? null;
 
+  let value: Profile = null;
   try {
-    const chat = await api.getChat(adminId);
-    const value =
-      chat.type === 'private'
-        ? { username: chat.username, firstName: chat.first_name }
-        : { username: undefined, firstName: undefined };
-    adminCache.id = adminId;
-    adminCache.at = Date.now();
-    adminCache.value = value;
-    return value;
+    const chat = await api.getChat(telegramId);
+    if (chat.type === 'private') value = { username: chat.username, firstName: chat.first_name };
   } catch {
-    adminCache.id = adminId;
-    adminCache.at = Date.now();
-    adminCache.value = null;
-    return null;
+    // Unknown until that user has messaged the bot — fall back to the cached label.
   }
+  profileCache.set(telegramId, { at: Date.now(), value });
+  return value;
+}
+
+/** Users with their live Telegram profile where we can get one. */
+async function usersWithProfiles() {
+  const rows = listUsers();
+  return Promise.all(
+    rows.map(async (user) => {
+      const profile = await resolveProfile(user.telegramId);
+      return {
+        telegramId: user.telegramId,
+        role: user.role,
+        label: user.label,
+        createdAt: user.createdAt,
+        username: profile?.username ?? null,
+        firstName: profile?.firstName ?? null,
+      };
+    }),
+  );
 }
 
 api.get('/status', async (_req, res) => {
@@ -63,7 +86,7 @@ api.get('/status', async (_req, res) => {
   const schedule = getSchedule();
   const pending = schedule.queueCount;
   const runwayMs = pending * settings.delayMinutes * 60_000;
-  const admin = await resolveAdmin(settings.adminId);
+  const users = await usersWithProfiles();
   const botState = botManager.getState();
 
   res.json({
@@ -76,9 +99,8 @@ api.get('/status', async (_req, res) => {
       firstName: botState.info?.first_name ?? null,
       id: botState.info?.id ?? null,
     },
-    admin: settings.adminId ? { id: settings.adminId, ...admin } : null,
+    users,
     settings: {
-      adminId: settings.adminId,
       delayMinutes: settings.delayMinutes,
       timezone: settings.timezone,
       targetChannelId: settings.targetChannelId,
@@ -128,13 +150,6 @@ api.put('/settings', async (req, res) => {
     else patch.timezone = value;
   }
 
-  if ('adminId' in body) {
-    const value = String(body.adminId ?? '').trim();
-    if (!value) patch.adminId = null;
-    else if (!isValidTelegramId(value)) errors.push('adminId must be a numeric Telegram user id');
-    else patch.adminId = value;
-  }
-
   if ('targetChannelId' in body) {
     const value = String(body.targetChannelId ?? '').trim();
     patch.targetChannelId = value || null;
@@ -162,7 +177,8 @@ api.put('/settings', async (req, res) => {
 
   const updated = updateSettings(patch);
   if (tokenChanged) {
-    adminCache.id = '';
+    // A different bot means different profile lookups.
+    profileCache.clear();
     await botManager.apply(updated.botToken);
   }
 
@@ -170,7 +186,6 @@ api.put('/settings', async (req, res) => {
     ok: true,
     bot: botManager.getState(),
     settings: {
-      adminId: updated.adminId,
       delayMinutes: updated.delayMinutes,
       timezone: updated.timezone,
       targetChannelId: updated.targetChannelId,
@@ -178,6 +193,78 @@ api.put('/settings', async (req, res) => {
       tokenMask: maskToken(updated.botToken),
     },
   });
+});
+
+// --- Users ------------------------------------------------------------------
+
+api.get('/users', async (_req, res) => {
+  res.json({ users: await usersWithProfiles() });
+});
+
+api.post('/users', async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const telegramId = String(body.telegramId ?? '').trim();
+  const role = body.role ?? 'manager';
+
+  if (!isValidTelegramId(telegramId) || telegramId.startsWith('-')) {
+    res.status(400).json({ error: 'telegramId must be a numeric Telegram user id' });
+    return;
+  }
+  if (!isRole(role)) {
+    res.status(400).json({ error: `role must be one of ${ROLES.join(', ')}` });
+    return;
+  }
+  if (getUser(telegramId)) {
+    res.status(409).json({ error: 'That user is already on the list.' });
+    return;
+  }
+
+  const profile = await resolveProfile(telegramId);
+  const label = profile?.username ? `@${profile.username}` : (profile?.firstName ?? null);
+  addUser(telegramId, role, label);
+
+  res.json({ ok: true, users: await usersWithProfiles() });
+});
+
+api.patch('/users/:telegramId', async (req, res) => {
+  const { telegramId } = req.params;
+  const role = (req.body as Record<string, unknown> | undefined)?.role;
+
+  if (!isRole(role)) {
+    res.status(400).json({ error: `role must be one of ${ROLES.join(', ')}` });
+    return;
+  }
+  if (!getUser(telegramId)) {
+    res.status(404).json({ error: 'No such user.' });
+    return;
+  }
+
+  const blocked = blocksLastAdmin(telegramId, role);
+  if (blocked) {
+    res.status(409).json({ error: blocked });
+    return;
+  }
+
+  setRole(telegramId, role);
+  res.json({ ok: true, users: await usersWithProfiles() });
+});
+
+api.delete('/users/:telegramId', async (req, res) => {
+  const { telegramId } = req.params;
+  if (!getUser(telegramId)) {
+    res.status(404).json({ error: 'No such user.' });
+    return;
+  }
+
+  const blocked = blocksLastAdmin(telegramId, null);
+  if (blocked) {
+    res.status(409).json({ error: blocked });
+    return;
+  }
+
+  removeUser(telegramId);
+  profileCache.delete(telegramId);
+  res.json({ ok: true, users: await usersWithProfiles() });
 });
 
 api.post('/bot/restart', async (_req, res) => {

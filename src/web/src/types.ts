@@ -11,6 +11,18 @@ export type Channel = {
   updatedAt: number;
 };
 
+export type Role = 'admin' | 'manager';
+
+export type User = {
+  telegramId: string;
+  role: Role;
+  /** Name cached the last time this user messaged the bot. */
+  label: string | null;
+  createdAt: number;
+  username: string | null;
+  firstName: string | null;
+};
+
 export type QueueItem = {
   id: number;
   sourceChatId: string;
@@ -41,9 +53,8 @@ export type Status = {
     firstName: string | null;
     id: number | null;
   };
-  admin: { id: string; username?: string; firstName?: string } | null;
+  users: User[];
   settings: {
-    adminId: string | null;
     delayMinutes: number;
     timezone: string;
     targetChannelId: string | null;

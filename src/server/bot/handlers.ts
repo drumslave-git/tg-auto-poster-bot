@@ -9,6 +9,7 @@ import {
   getSettings,
   updateSettings,
 } from '../services/settings.js';
+import { getUser, hasNoUsers, roleOf, setLabel } from '../services/users.js';
 import {
   contentTypeLabel,
   escapeHtml,
@@ -19,24 +20,37 @@ import {
 import { bufferAlbumMessage } from './albumBuffer.js';
 import { describe } from './capture.js';
 
-const HELP = [
-  '<b>Auto-poster commands</b>',
-  '',
-  'Send me any message — text, photo, video, album, link, file — and it goes into the queue.',
-  '',
+const INTRO = 'Send me any message — text, photo, video, album, link, file — and it goes into the queue.';
+
+const SHARED_COMMANDS = [
   '/queue — how many posts are waiting',
   '/till — time until the next automatic post',
   '/summary — queue size, next post time, total runway',
+];
+
+const ADMIN_HELP = [
+  '<b>Auto-poster commands</b>',
+  '',
+  INTRO,
+  '',
+  ...SHARED_COMMANDS,
   '/delay N — set the delay between posts to N minutes',
   '/post — publish the next item right now',
   '/clear — empty the queue',
   '/help — this message',
 ].join('\n');
 
-function isAdmin(ctx: Context): boolean {
-  const adminId = getSettings().adminId;
-  return Boolean(adminId && ctx.from && String(ctx.from.id) === adminId);
-}
+const MANAGER_HELP = [
+  '<b>Auto-poster commands</b>',
+  '',
+  INTRO,
+  '',
+  ...SHARED_COMMANDS,
+  '/help — this message',
+  '',
+  'You are a manager: you can add posts and check the schedule. Changing the ' +
+    'delay, publishing early and clearing the queue are admin-only.',
+].join('\n');
 
 function isPrivate(ctx: Context): boolean {
   return ctx.chat?.type === 'private';
@@ -117,12 +131,13 @@ export function registerHandlers(bot: Bot): void {
   bot.command(['start', 'help'], async (ctx) => {
     if (!isPrivate(ctx)) return;
     if (!(await guard(ctx))) return;
-    await ctx.reply(HELP, { parse_mode: 'HTML' });
+    const help = roleOf(ctx.from?.id) === 'admin' ? ADMIN_HELP : MANAGER_HELP;
+    await ctx.reply(help, { parse_mode: 'HTML' });
   });
 
   bot.command('delay', async (ctx) => {
     if (!isPrivate(ctx)) return;
-    if (!(await guard(ctx))) return;
+    if (!(await guard(ctx, 'admin'))) return;
 
     const raw = ctx.match.trim();
     if (!raw) {
@@ -155,7 +170,7 @@ export function registerHandlers(bot: Bot): void {
 
   bot.command('post', async (ctx) => {
     if (!isPrivate(ctx)) return;
-    if (!(await guard(ctx))) return;
+    if (!(await guard(ctx, 'admin'))) return;
 
     const result = await postNext(ctx.api, 'manual');
     if (!result.ok) {
@@ -172,7 +187,7 @@ export function registerHandlers(bot: Bot): void {
 
   bot.command('clear', async (ctx) => {
     if (!isPrivate(ctx)) return;
-    if (!(await guard(ctx))) return;
+    if (!(await guard(ctx, 'admin'))) return;
     const removed = clearQueue();
     await ctx.reply(removed === 0 ? 'Queue was already empty.' : `🗑 Cleared ${removed} queued post${removed === 1 ? '' : 's'}.`);
   });
@@ -241,17 +256,31 @@ export function registerHandlers(bot: Bot): void {
 }
 
 /**
- * Everything is admin-only. When no admin is configured yet, tell whoever wrote
- * their own id so they can paste it into the dashboard.
+ * Only known users get answered — strangers are ignored silently. Managers may
+ * queue posts and read the schedule; `need: 'admin'` marks the commands that
+ * change configuration or publish. When nobody is configured yet, tell whoever
+ * wrote their own id so they can paste it into the dashboard.
  */
-async function guard(ctx: Context): Promise<boolean> {
-  const { adminId } = getSettings();
-  if (!adminId) {
+async function guard(ctx: Context, need: 'any' | 'admin' = 'any'): Promise<boolean> {
+  if (hasNoUsers()) {
     await ctx.reply(
       `This bot has no admin configured yet.\nYour Telegram user ID is <code>${ctx.from?.id}</code> — set it in the dashboard.`,
       { parse_mode: 'HTML' },
     );
     return false;
   }
-  return isAdmin(ctx);
+
+  const from = ctx.from;
+  const user = from ? getUser(String(from.id)) : undefined;
+  if (!user) return false;
+
+  // Free name refresh: the dashboard shows this without calling getChat.
+  const label = from?.username ? `@${from.username}` : (from?.first_name ?? null);
+  if (label && label !== user.label) setLabel(user.telegramId, label);
+
+  if (need === 'admin' && user.role !== 'admin') {
+    await ctx.reply('That command is admin-only. You can still send me posts for the queue.');
+    return false;
+  }
+  return true;
 }

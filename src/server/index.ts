@@ -8,10 +8,12 @@ import { startScheduler, stopScheduler } from './bot/scheduler.js';
 import { runMigrations } from './db/index.js';
 import { env } from './env.js';
 import { ensureSettings } from './services/settings.js';
+import { ensureUsers } from './services/users.js';
 
 async function main(): Promise<void> {
   runMigrations();
   const settings = ensureSettings();
+  ensureUsers();
 
   const app = express();
   app.use(express.json({ limit: '1mb' }));

@@ -1,4 +1,4 @@
-import type { PostRecord, QueueItem, Status } from './types';
+import type { PostRecord, QueueItem, Role, Status, User } from './types';
 
 const PASSWORD_KEY = 'tg-poster-dashboard-password';
 
@@ -38,17 +38,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export type SettingsPayload = {
   botToken?: string;
-  adminId?: string;
   targetChannelId?: string;
   delayMinutes?: number;
   timezone?: string;
 };
+
+type UsersResponse = { ok: boolean; users: User[] };
 
 export const apiClient = {
   status: () => request<Status>('/status'),
   saveSettings: (payload: SettingsPayload) =>
     request<{ ok: boolean }>('/settings', { method: 'PUT', body: JSON.stringify(payload) }),
   restartBot: () => request<{ ok: boolean }>('/bot/restart', { method: 'POST' }),
+  addUser: (telegramId: string, role: Role) =>
+    request<UsersResponse>('/users', { method: 'POST', body: JSON.stringify({ telegramId, role }) }),
+  setUserRole: (telegramId: string, role: Role) =>
+    request<UsersResponse>(`/users/${telegramId}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  removeUser: (telegramId: string) =>
+    request<UsersResponse>(`/users/${telegramId}`, { method: 'DELETE' }),
   queue: () => request<{ count: number; items: QueueItem[] }>('/queue'),
   posts: () => request<{ count: number; items: PostRecord[] }>('/posts'),
   removeQueueItem: (id: number) => request<{ ok: boolean }>(`/queue/${id}`, { method: 'DELETE' }),

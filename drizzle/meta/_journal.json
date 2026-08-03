@@ -8,6 +8,13 @@
       "when": 1785723994651,
       "tag": "0000_neat_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785747252292,
+      "tag": "0001_add_users_roles",
+      "breakpoints": true
     }
   ]
 }

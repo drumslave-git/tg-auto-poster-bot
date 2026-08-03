@@ -18,7 +18,6 @@ export function ensureSettings(): Settings {
     .values({
       id: SETTINGS_ID,
       botToken: env.initialBotToken,
-      adminId: env.initialAdminId,
       delayMinutes: DEFAULT_DELAY_MINUTES,
       timezone: env.initialTimezone,
       updatedAt: new Date(),
@@ -35,7 +34,7 @@ export function getSettings(): Settings {
 }
 
 export type SettingsPatch = Partial<
-  Pick<Settings, 'botToken' | 'adminId' | 'targetChannelId' | 'delayMinutes' | 'timezone'>
+  Pick<Settings, 'botToken' | 'targetChannelId' | 'delayMinutes' | 'timezone'>
 >;
 
 export function updateSettings(patch: SettingsPatch): Settings {

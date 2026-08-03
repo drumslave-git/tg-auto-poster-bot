@@ -3,6 +3,15 @@ import path from 'node:path';
 
 const cwd = process.cwd();
 
+/** `123, 456` → `['123', '456']`. Blank entries are dropped. */
+function idList(...values: (string | undefined)[]): string[] {
+  const ids = values
+    .flatMap((value) => (value ?? '').split(','))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return [...new Set(ids)];
+}
+
 export const env = {
   port: Number(process.env.PORT ?? 3000),
   databasePath: path.resolve(cwd, process.env.DATABASE_PATH ?? './data/app.db'),
@@ -10,7 +19,9 @@ export const env = {
   dashboardPassword: process.env.DASHBOARD_PASSWORD?.trim() || null,
   /** Bootstrap values, only used the very first time the DB is created. */
   initialBotToken: process.env.BOT_TOKEN?.trim() || null,
-  initialAdminId: process.env.ADMIN_ID?.trim() || null,
+  /** ADMIN_ID is the older single-value name, still accepted. */
+  initialAdminIds: idList(process.env.ADMIN_IDS, process.env.ADMIN_ID),
+  initialManagerIds: idList(process.env.MANAGER_IDS),
   initialTimezone: process.env.TZ_NAME?.trim() || 'UTC',
   webDist: path.resolve(cwd, 'dist/web'),
   isProduction: process.env.NODE_ENV === 'production',

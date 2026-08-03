@@ -12,7 +12,6 @@ function timezoneOptions(): string[] {
 export function SettingsPanel({ status, onSaved }: { status: Status; onSaved: () => void }) {
   const { settings, channels } = status;
   const [token, setToken] = useState('');
-  const [adminId, setAdminId] = useState(settings.adminId ?? '');
   const [delay, setDelay] = useState(String(settings.delayMinutes));
   const [timezone, setTimezone] = useState(settings.timezone);
   const [target, setTarget] = useState(settings.targetChannelId ?? '');
@@ -20,7 +19,6 @@ export function SettingsPanel({ status, onSaved }: { status: Status; onSaved: ()
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
   // Adopt server values when they change underneath us (e.g. /delay from chat).
-  useEffect(() => setAdminId(settings.adminId ?? ''), [settings.adminId]);
   useEffect(() => setDelay(String(settings.delayMinutes)), [settings.delayMinutes]);
   useEffect(() => setTimezone(settings.timezone), [settings.timezone]);
   useEffect(() => setTarget(settings.targetChannelId ?? ''), [settings.targetChannelId]);
@@ -33,7 +31,6 @@ export function SettingsPanel({ status, onSaved }: { status: Status; onSaved: ()
     setMessage(null);
 
     const payload: SettingsPayload = {
-      adminId: adminId.trim(),
       delayMinutes: Number(delay),
       timezone: timezone.trim(),
       targetChannelId: target,
@@ -92,16 +89,6 @@ export function SettingsPanel({ status, onSaved }: { status: Status; onSaved: ()
             />
           </Field>
         </div>
-
-        <Field label="Admin user ID" hint="Only this Telegram user may talk to the bot.">
-          <input
-            className={inputClass}
-            inputMode="numeric"
-            placeholder="123456789"
-            value={adminId}
-            onChange={(e) => setAdminId(e.target.value)}
-          />
-        </Field>
 
         <Field label="Delay (minutes)" hint="Time since the last message in the channel.">
           <input
