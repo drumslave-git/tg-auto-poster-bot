@@ -5,6 +5,7 @@ import type { Message } from 'grammy/types';
 import { YT_DLP, exclusiveYtDlp, summarizeYtDlpError } from '../services/tools.js';
 import { type CommandResult, runCommand } from '../util/exec.js';
 import { formatBytes } from '../util/format.js';
+import { privateHostReason } from '../util/network.js';
 import { detectContentType } from './capture.js';
 
 /**
@@ -20,6 +21,30 @@ const URL_PATTERN = /https?:\/\/[^\s<>"']+/i;
 
 /** Sentence punctuation that ends up glued to a link written inline in prose. */
 const TRAILING_JUNK = /[.,;:!?)\]}'"»]+$/;
+
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/**
+ * A link we are willing to hand to yt-dlp, in canonical form, or null.
+ *
+ * Everything here is untrusted: a `text_link` entity carries whatever URL the
+ * sender chose, and Telegram marks bare domains as links too. Only http(s)
+ * survives — `file:`, `tg:` and friends are not media links and have no
+ * business reaching a downloader.
+ */
+function normalizeUrl(raw: string): string | null {
+  const trimmed = raw.trim().replace(TRAILING_JUNK, '');
+  if (!trimmed) return null;
+
+  try {
+    // A bare `example.com/clip` is a link as far as Telegram is concerned.
+    const parsed = new URL(HAS_SCHEME.test(trimmed) ? trimmed : `https://${trimmed}`);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The link to download from, or null when this message is not just a link.
@@ -40,15 +65,16 @@ export function extractDownloadUrl(message: Message): string | null {
 
   const first = entities[0];
   if (first) {
-    if (first.type === 'text_link') return first.url;
-    return text.slice(first.offset, first.offset + first.length);
+    return normalizeUrl(
+      first.type === 'text_link'
+        ? first.url
+        : text.slice(first.offset, first.offset + first.length),
+    );
   }
 
   // Clients that send no entities (and plain API callers) still get a link.
   const match = URL_PATTERN.exec(text);
-  if (!match) return null;
-  const url = match[0].replace(TRAILING_JUNK, '');
-  return url.length > 'https://'.length ? url : null;
+  return match ? normalizeUrl(match[0]) : null;
 }
 
 export type MediaKind = 'video' | 'animation' | 'audio' | 'photo' | 'document';
@@ -210,6 +236,10 @@ export function downloadMedia(url: string): Promise<DownloadResult> {
 }
 
 async function downloadNow(url: string): Promise<DownloadResult> {
+  // Checked before anything is spent on it: the host, not just the scheme.
+  const blocked = await privateHostReason(url);
+  if (blocked) return { ok: false, error: blocked };
+
   const dir = await mkdtemp(path.join(os.tmpdir(), 'tg-poster-'));
   const cleanup = () => rm(dir, { recursive: true, force: true });
   const fail = async (error: string): Promise<DownloadResult> => {

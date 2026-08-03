@@ -107,6 +107,12 @@ from, and that caption travels to the channel with the post.
 - **What you get**: a single video (never a whole playlist), preferring ≤1080p h264 in an
   mp4 so Telegram plays it inline. Audio, images and GIFs are sent as their own kinds;
   anything else goes as a file.
+- **Public `http(s)` links only.** Any other scheme is refused, and so is any host that
+  resolves to a loopback, private, link-local or otherwise non-routable address. Without
+  that, anyone allowed to send the bot a link could have it read your dashboard API, your
+  cloud provider's metadata service, or any box on the LAN, and post the answer to the
+  channel. Treat it as a guard, not a boundary: it cannot follow a redirect into a private
+  range, so restrict the container's egress if you need that guaranteed.
 - **If the download fails**, the bot replies to your link with yt-dlp's reason — private
   video, unsupported site, over the limit, no media there — and **nothing is queued**.
   Downloads run one at a time, so several links in a row are handled in order.
@@ -212,6 +218,18 @@ The dashboard stores the bot token, so do not expose it. Set `DASHBOARD_PASSWORD
 `.env` to require a shared secret on every `/api` call; the server logs a warning at boot
 when it is unset. Bind the port to localhost or put it behind a reverse proxy with TLS if
 it needs to be reachable remotely.
+
+Two things follow from turning links into posts, both worth understanding before you add
+anyone as a manager:
+
+- **The bot fetches URLs on your host's behalf.** Only people on the user list can send it
+  a link at all, but that request leaves from inside your network, so http(s) is enforced
+  and non-routable hosts are refused (see [Links become media](#links-become-media)). The
+  refusal is a guard against the obvious targets, not a substitute for restricted egress.
+- **yt-dlp updates itself from GitHub**, unpinned, and runs as the app user — which is the
+  point, since extractors rot fast, but it does mean a compromised yt-dlp release would be
+  a compromised bot within a day. Pin a version in the `Dockerfile` and drop
+  `startToolMaintenance()` if you would rather trade freshness for a fixed dependency.
 
 ## Self-hosting with Docker
 

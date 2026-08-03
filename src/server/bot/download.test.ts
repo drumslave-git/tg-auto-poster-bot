@@ -62,7 +62,34 @@ describe('extractDownloadUrl', () => {
 
   it('ignores text with no link in it', () => {
     expect(extractDownloadUrl(message({ text: 'just a thought' }))).toBeNull();
+    // No entity and no scheme — nothing here says "link".
     expect(extractDownloadUrl(message({ text: 'example.com/clip' }))).toBeNull();
+  });
+
+  it('accepts only http and https', () => {
+    const hidden = (url: string) =>
+      extractDownloadUrl(
+        message({ text: 'tap', entities: [{ type: 'text_link', offset: 0, length: 3, url }] }),
+      );
+
+    expect(hidden('https://example.com/clip')).toBe('https://example.com/clip');
+    expect(hidden('http://example.com/clip')).toBe('http://example.com/clip');
+    expect(hidden('file:///etc/passwd')).toBeNull();
+    expect(hidden('tg://resolve?domain=x')).toBeNull();
+    expect(hidden('javascript:alert(1)')).toBeNull();
+    expect(hidden('ftp://example.com/clip')).toBeNull();
+    expect(hidden('not a url at all')).toBeNull();
+  });
+
+  it('gives a bare domain the scheme Telegram left off', () => {
+    // Telegram marks `example.com/clip` as a url entity, without a scheme.
+    expect(
+      extractDownloadUrl(message({ text: 'example.com/clip', entities: [urlEntity(0, 16)] })),
+    ).toBe('https://example.com/clip');
+  });
+
+  it('rejects a scheme with nothing behind it', () => {
+    expect(extractDownloadUrl(message({ text: 'https://' }))).toBeNull();
   });
 
   it('leaves media alone — a caption link is not a download request', () => {
