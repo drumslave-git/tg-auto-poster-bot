@@ -6,7 +6,8 @@ next item from the queue. A web dashboard shows the countdown, the queue, and ev
 
 ## Stack
 
-Node + Express + TypeScript · grammY · Drizzle ORM + SQLite · React + Vite + Tailwind v4
+Node + Express + TypeScript · grammY · Drizzle ORM + SQLite · React + Vite + Tailwind v4 ·
+Vitest · Docker
 
 ## Quick start
 
@@ -162,6 +163,74 @@ The dashboard stores the bot token, so do not expose it. Set `DASHBOARD_PASSWORD
 when it is unset. Bind the port to localhost or put it behind a reverse proxy with TLS if
 it needs to be reachable remotely.
 
+## Self-hosting with Docker
+
+```bash
+docker compose up --build -d
+```
+
+The dashboard is then on `http://localhost:3000`, and everything the bot knows —
+settings, people, channels, queue and post history — lives in one SQLite file under
+`./data`, so a redeploy keeps the queue. Migrations run at boot, before the server
+accepts traffic; a failed migration fails the start rather than serving against an old
+schema.
+
+Every knob has a default, so a bare `docker compose up` works. Override any of them in
+`.env` (or the host environment) instead of editing the compose file:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `PORT` | `3000` | Host port published for the dashboard |
+| `DATA_DIR` | `./data` | Host directory holding the SQLite database |
+| `DASHBOARD_PASSWORD` | *(empty)* | Shared secret for every `/api` call — set it if the dashboard is reachable from anywhere but localhost |
+| `BOT_TOKEN`, `ADMIN_IDS`, `MANAGER_IDS`, `TZ_NAME` | *(empty)* | Bootstrap values, used only when the database is first created |
+| `TZ` | `UTC` | Container clock |
+| `IMAGE` | `tg-auto-poster-bot` | Image name to build/run |
+
+Two things worth knowing:
+
+- The container runs as a **non-root user**, so the host directory behind `DATA_DIR`
+  must be writable by it (`chown 1000:1000 ./data` covers the usual case).
+- `.env` is dockerignored on purpose — compose supplies the environment at runtime, so
+  no secret is ever baked into the image.
+
+Published images are `<dockerhub-user>/tg-auto-poster-bot:<version>` and `:latest`; to run
+one without building, replace `build: .` with `image:` in `docker-compose.yml`.
+
+## Releases
+
+The `version` field in `package.json` is the release trigger — nothing ships until it
+changes on `main`.
+
+```bash
+npm run release:patch
+```
+
+Commit the bump and push to `main`. The `Release` workflow wakes only when
+`package.json` is touched, compares the version against the previous commit, and on a
+real change runs the typecheck and the tests, pushes the tag `vX.Y.Z`, and publishes the
+image to Docker Hub as both `:X.Y.Z` and `:latest`. An unchanged version means nothing
+runs, so ordinary dependency edits are free. Use `release:minor` for features and
+`release:major` for breaking changes; a bump on its own is enough to rebuild, no code
+change needed.
+
+The tag is created by CI, never locally, so local and remote tags cannot diverge. The
+workflow needs two repository secrets under **Settings → Secrets and variables →
+Actions**: `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access token, not
+the account password).
+
+## Tests
+
+```bash
+npm test
+```
+
+Vitest, no watch mode in CI (`npm run test:watch` for local work). The server tests run
+against a real SQLite database: each test file gets its own throwaway file in the
+system temp directory, migrated once and emptied between tests, so nothing is stubbed
+except the Telegram API and the clock. The HTTP tests boot the real Express router on
+an ephemeral port.
+
 ## Project layout
 
 ```
@@ -170,9 +239,12 @@ src/server
   bot/          grammY bot: lifecycle, handlers, album buffer, scheduler
   db/           Drizzle schema and connection
   services/     settings, users/roles, queue, channels, posting logic
+  test/         scratch-database helpers for the test suite
 src/web         React dashboard (Vite root)
 drizzle/        generated SQL migrations, applied at boot
 ```
+
+Tests sit next to the code they cover, as `*.test.ts`.
 
 ## Scripts
 
@@ -181,5 +253,8 @@ drizzle/        generated SQL migrations, applied at boot
 | `npm run dev` | Server (watch) + Vite dev server |
 | `npm run build` | Compile the server and bundle the dashboard |
 | `npm start` | Run the compiled server, serving the built dashboard |
-| `npm run typecheck` | Type-check server and web |
+| `npm run typecheck` | Type-check server, tests and web |
+| `npm test` | Run the test suite once |
+| `npm run test:watch` | Re-run tests as files change |
 | `npm run db:generate` | Regenerate migrations after editing the schema |
+| `npm run release:patch` \| `:minor` \| `:major` | Bump the version to cut a release |
