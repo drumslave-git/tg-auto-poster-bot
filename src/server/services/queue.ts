@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, isNotNull, isNull } from 'drizzle-orm';
+import type { MessageEntity } from 'grammy/types';
 import { db } from '../db/index.js';
 import {
   posts,
@@ -19,12 +20,23 @@ export type NewQueueItem = {
   kind: PostKind;
   contentType: string;
   preview: string;
+  /** The post's own words, kept verbatim so a footer can be appended to them. */
+  sourceText?: string;
+  sourceEntities?: MessageEntity[];
 };
 
 export function enqueue(item: NewQueueItem): QueuedPost {
   const row = db
     .insert(posts)
-    .values({ ...item, createdAt: new Date() })
+    .values({
+      ...item,
+      // Anything we queue ourselves records its text, even when there is none.
+      // Null stays reserved for rows written before the bot kept it, whose
+      // caption cannot be rebuilt and so must be copied untouched.
+      sourceText: item.sourceText ?? '',
+      sourceEntities: item.sourceEntities ?? [],
+      createdAt: new Date(),
+    })
     .returning()
     .get();
   notifyDashboard();

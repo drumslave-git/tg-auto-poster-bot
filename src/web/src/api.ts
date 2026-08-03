@@ -46,6 +46,12 @@ export type SettingsPayload = {
   delayMinutes?: number;
   timezone?: string;
   paused?: boolean;
+  queueRawOnFailure?: boolean;
+  downloadMetadata?: boolean;
+  postFooter?: string;
+  /** `HH:MM`, or `''` to lift the restriction. Both ends travel together. */
+  windowStart?: string;
+  windowEnd?: string;
 };
 
 type UsersResponse = { ok: boolean; users: User[] };

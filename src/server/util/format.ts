@@ -64,6 +64,26 @@ export function truncate(value: string, max = 140): string {
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
 }
 
+/**
+ * Cuts a string to `max` UTF-16 units without splitting a surrogate pair —
+ * half an emoji is not a character, and Telegram counts these units too.
+ */
+export function clip(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const cut = max > 0 && isHighSurrogate(value.charCodeAt(max - 1)) ? max - 1 : max;
+  return value.slice(0, cut);
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+/** Like `truncate`, but keeps the line breaks the writer put in. */
+export function truncateLines(value: string, max: number): string {
+  const trimmed = value.trim();
+  return trimmed.length > max ? `${clip(trimmed, max - 1)}…` : trimmed;
+}
+
 /** Telegram HTML parse mode escaping. */
 export function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

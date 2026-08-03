@@ -116,11 +116,98 @@ describe('PUT /settings', () => {
     expect(body.error).toMatch(/time zone/);
   });
 
+  it('stores the footer and trims it', async () => {
+    const { body } = await call('PUT', '/api/settings', { postFooter: '  Subscribe!  ' });
+
+    expect(body.settings).toMatchObject({ postFooter: 'Subscribe!' });
+    expect(getSettings().postFooter).toBe('Subscribe!');
+  });
+
+  it('clears the footer when it is emptied', async () => {
+    await call('PUT', '/api/settings', { postFooter: 'Subscribe!' });
+
+    const { body } = await call('PUT', '/api/settings', { postFooter: '   ' });
+
+    expect(body.settings).toMatchObject({ postFooter: '' });
+    expect(getSettings().postFooter).toBeNull();
+  });
+
+  it('rejects a footer longer than a caption can spare', async () => {
+    const { status, body } = await call('PUT', '/api/settings', { postFooter: 'x'.repeat(401) });
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/postFooter/);
+  });
+
+  it('stores the posting window as clock times', async () => {
+    const { body } = await call('PUT', '/api/settings', {
+      windowStart: '13:00',
+      windowEnd: '17:30',
+    });
+
+    expect(body.settings).toMatchObject({ windowStart: '13:00', windowEnd: '17:30' });
+    expect(getSettings()).toMatchObject({ windowStart: 13 * 60, windowEnd: 17 * 60 + 30 });
+  });
+
+  it('clears the window when both ends are emptied', async () => {
+    await call('PUT', '/api/settings', { windowStart: '13:00', windowEnd: '17:00' });
+
+    const { body } = await call('PUT', '/api/settings', { windowStart: '', windowEnd: '' });
+
+    expect(body.settings).toMatchObject({ windowStart: null, windowEnd: null });
+    expect(getSettings()).toMatchObject({ windowStart: null, windowEnd: null });
+  });
+
+  it('rejects a window that is not a time of day', async () => {
+    const { status, body } = await call('PUT', '/api/settings', {
+      windowStart: '25:00',
+      windowEnd: '17:00',
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/windowStart/);
+  });
+
+  it('refuses half a window', async () => {
+    const { status, body } = await call('PUT', '/api/settings', { windowStart: '13:00' });
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/both/);
+  });
+
+  it('refuses a window with no width', async () => {
+    const { status, body } = await call('PUT', '/api/settings', {
+      windowStart: '13:00',
+      windowEnd: '13:00',
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/differ/);
+  });
+
   it('rejects a non-boolean pause', async () => {
     const { status, body } = await call('PUT', '/api/settings', { paused: 'yes' });
 
     expect(status).toBe(400);
     expect(body.error).toMatch(/paused/);
+  });
+
+  it('toggles the download switches', async () => {
+    const { body } = await call('PUT', '/api/settings', {
+      queueRawOnFailure: true,
+      downloadMetadata: false,
+    });
+
+    expect(body.settings).toMatchObject({ queueRawOnFailure: true, downloadMetadata: false });
+    expect(getSettings()).toMatchObject({ queueRawOnFailure: true, downloadMetadata: false });
+  });
+
+  it('rejects a non-boolean download switch', async () => {
+    for (const key of ['queueRawOnFailure', 'downloadMetadata']) {
+      const { status, body } = await call('PUT', '/api/settings', { [key]: 'yes' });
+      expect(status).toBe(400);
+      expect(body.error).toMatch(new RegExp(key));
+    }
   });
 
   it('collects every complaint at once', async () => {

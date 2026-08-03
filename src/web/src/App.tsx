@@ -189,7 +189,15 @@ export default function App() {
           value={stats.targetChannelTitle ?? '—'}
           hint={stats.targetChannelId ?? 'no target'}
         />
-        <Stat label="Delay" value={`${settings.delayMinutes} min`} hint={settings.timezone} />
+        <Stat
+          label="Delay"
+          value={`${settings.delayMinutes} min`}
+          hint={
+            stats.window
+              ? `${stats.window.start}–${stats.window.end} · ${settings.timezone}`
+              : settings.timezone
+          }
+        />
         <Stat
           label="Next post"
           value={settings.paused ? 'Paused' : formatDateTime(stats.nextPostAt, settings.timezone)}

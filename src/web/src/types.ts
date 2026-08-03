@@ -64,6 +64,15 @@ export type Status = {
     timezone: string;
     targetChannelId: string | null;
     paused: boolean;
+    /** Queue the sender's own message when its link cannot be downloaded. */
+    queueRawOnFailure: boolean;
+    /** Add the scraped title and a source link to a downloaded post. */
+    downloadMetadata: boolean;
+    /** Appended to every post; `''` when there is none. */
+    postFooter: string;
+    /** `HH:MM` bounds on the hours posting may happen in, or null for any hour. */
+    windowStart: string | null;
+    windowEnd: string | null;
     hasToken: boolean;
     tokenMask: string | null;
   };
@@ -82,6 +91,7 @@ export type Status = {
     targetChannelTitle: string | null;
     runwayMs: number;
     queueEmptiesAt: string | null;
+    window: { start: string; end: string } | null;
   };
   scheduler: { running: boolean; lastTickAt: string | null; lastError: string | null };
   tools: Tools;

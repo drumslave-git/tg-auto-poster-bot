@@ -10,6 +10,12 @@ export const DEFAULT_DELAY_MINUTES = 60;
 export const MIN_DELAY_MINUTES = 1;
 export const MAX_DELAY_MINUTES = 60 * 24 * 30;
 
+/**
+ * A caption may hold 1024 characters in total, so the footer has to leave the
+ * post itself most of the room — it is a sign-off, not a second post.
+ */
+export const MAX_FOOTER_LENGTH = 400;
+
 /** Creates the singleton row on first boot, seeded from env when provided. */
 export function ensureSettings(): Settings {
   const existing = db.select().from(settings).where(eq(settings.id, SETTINGS_ID)).get();
@@ -35,8 +41,37 @@ export function getSettings(): Settings {
 }
 
 export type SettingsPatch = Partial<
-  Pick<Settings, 'botToken' | 'targetChannelId' | 'delayMinutes' | 'timezone' | 'paused'>
+  Pick<
+    Settings,
+    | 'botToken'
+    | 'targetChannelId'
+    | 'delayMinutes'
+    | 'timezone'
+    | 'paused'
+    | 'postFooter'
+    | 'windowStart'
+    | 'windowEnd'
+    | 'queueRawOnFailure'
+    | 'downloadMetadata'
+  >
 >;
+
+/** The hours posting is allowed in, or null when it may happen at any time. */
+export type PostingWindow = { start: number; end: number };
+
+export function postingWindow(settings: Settings): PostingWindow | null {
+  const { windowStart, windowEnd } = settings;
+  if (windowStart === null || windowEnd === null) return null;
+  // Start and end on the same minute would be a window nothing fits through;
+  // it means "no window" instead of never posting again.
+  if (windowStart === windowEnd) return null;
+  return { start: windowStart, end: windowEnd };
+}
+
+/** The footer to append to every post, or null when there is nothing to add. */
+export function postFooter(settings: Settings): string | null {
+  return settings.postFooter?.trim() || null;
+}
 
 export function isPaused(): boolean {
   return getSettings().paused;

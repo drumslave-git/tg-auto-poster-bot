@@ -4,7 +4,8 @@ import {
   FIELD_SEPARATOR,
   MAX_DOWNLOAD_BYTES,
   buildYtDlpArgs,
-  extractDownloadUrl,
+  downloadCaption,
+  extractDownloadRequest,
   mediaKindFor,
   mentionsSizeLimit,
   parseMetadata,
@@ -19,58 +20,51 @@ function urlEntity(offset: number, length: number): MessageEntity {
   return { type: 'url', offset, length };
 }
 
-describe('extractDownloadUrl', () => {
+/** Most cases only care about the link; the note has its own block below. */
+function urlIn(partial: Partial<Message>): string | null {
+  return extractDownloadRequest(message(partial))?.url ?? null;
+}
+
+describe('extractDownloadRequest', () => {
   it('takes the link Telegram marked up', () => {
     const text = 'look at https://example.com/clip please';
-    expect(extractDownloadUrl(message({ text, entities: [urlEntity(8, 24)] }))).toBe(
-      'https://example.com/clip',
-    );
+    expect(urlIn({ text, entities: [urlEntity(8, 24)] })).toBe('https://example.com/clip');
   });
 
   it('follows a hidden link to its target', () => {
     expect(
-      extractDownloadUrl(
-        message({
-          text: 'this one',
-          entities: [{ type: 'text_link', offset: 0, length: 4, url: 'https://example.com/v/1' }],
-        }),
-      ),
+      urlIn({
+        text: 'this one',
+        entities: [{ type: 'text_link', offset: 0, length: 4, url: 'https://example.com/v/1' }],
+      }),
     ).toBe('https://example.com/v/1');
   });
 
   it('takes the first of several links', () => {
     const text = 'https://a.example/1 and https://b.example/2';
-    expect(
-      extractDownloadUrl(message({ text, entities: [urlEntity(24, 19), urlEntity(0, 19)] })),
-    ).toBe('https://a.example/1');
+    expect(urlIn({ text, entities: [urlEntity(24, 19), urlEntity(0, 19)] })).toBe(
+      'https://a.example/1',
+    );
   });
 
   it('finds a link even without entities', () => {
-    expect(extractDownloadUrl(message({ text: 'see http://example.com/a.mp4' }))).toBe(
-      'http://example.com/a.mp4',
-    );
+    expect(urlIn({ text: 'see http://example.com/a.mp4' })).toBe('http://example.com/a.mp4');
   });
 
   it('drops punctuation the sentence glued to the link', () => {
-    expect(extractDownloadUrl(message({ text: 'watch https://example.com/clip.' }))).toBe(
-      'https://example.com/clip',
-    );
-    expect(extractDownloadUrl(message({ text: '(https://example.com/clip)' }))).toBe(
-      'https://example.com/clip',
-    );
+    expect(urlIn({ text: 'watch https://example.com/clip.' })).toBe('https://example.com/clip');
+    expect(urlIn({ text: '(https://example.com/clip)' })).toBe('https://example.com/clip');
   });
 
   it('ignores text with no link in it', () => {
-    expect(extractDownloadUrl(message({ text: 'just a thought' }))).toBeNull();
+    expect(urlIn({ text: 'just a thought' })).toBeNull();
     // No entity and no scheme — nothing here says "link".
-    expect(extractDownloadUrl(message({ text: 'example.com/clip' }))).toBeNull();
+    expect(urlIn({ text: 'example.com/clip' })).toBeNull();
   });
 
   it('accepts only http and https', () => {
     const hidden = (url: string) =>
-      extractDownloadUrl(
-        message({ text: 'tap', entities: [{ type: 'text_link', offset: 0, length: 3, url }] }),
-      );
+      urlIn({ text: 'tap', entities: [{ type: 'text_link', offset: 0, length: 3, url }] });
 
     expect(hidden('https://example.com/clip')).toBe('https://example.com/clip');
     expect(hidden('http://example.com/clip')).toBe('http://example.com/clip');
@@ -83,22 +77,111 @@ describe('extractDownloadUrl', () => {
 
   it('gives a bare domain the scheme Telegram left off', () => {
     // Telegram marks `example.com/clip` as a url entity, without a scheme.
-    expect(
-      extractDownloadUrl(message({ text: 'example.com/clip', entities: [urlEntity(0, 16)] })),
-    ).toBe('https://example.com/clip');
+    expect(urlIn({ text: 'example.com/clip', entities: [urlEntity(0, 16)] })).toBe(
+      'https://example.com/clip',
+    );
   });
 
   it('rejects a scheme with nothing behind it', () => {
-    expect(extractDownloadUrl(message({ text: 'https://' }))).toBeNull();
+    expect(urlIn({ text: 'https://' })).toBeNull();
   });
 
   it('leaves media alone — a caption link is not a download request', () => {
+    expect(urlIn({ photo: [] as never, caption: 'from https://example.com/clip' })).toBeNull();
+    expect(urlIn({ video: {} as never })).toBeNull();
+  });
+});
+
+describe('extractDownloadRequest — the note', () => {
+  it('keeps what the sender wrote around the link', () => {
+    const text = 'look at https://example.com/clip please';
+
+    expect(extractDownloadRequest(message({ text, entities: [urlEntity(8, 24)] }))).toEqual({
+      url: 'https://example.com/clip',
+      note: 'look at please',
+    });
+  });
+
+  it('is empty when the link stood alone', () => {
+    const text = 'https://example.com/clip';
+
+    expect(extractDownloadRequest(message({ text, entities: [urlEntity(0, 24)] }))?.note).toBe('');
+  });
+
+  it('keeps the line breaks of a caption written under the link', () => {
+    const text = 'https://example.com/clip\nFirst line\n\nSecond line';
+
+    expect(extractDownloadRequest(message({ text, entities: [urlEntity(0, 24)] }))?.note).toBe(
+      'First line\n\nSecond line',
+    );
+  });
+
+  it('keeps the words a hidden link is written behind', () => {
+    // The URL is not in the text at all here — every word of it is the sender's.
     expect(
-      extractDownloadUrl(
-        message({ photo: [] as never, caption: 'from https://example.com/clip' }),
+      extractDownloadRequest(
+        message({
+          text: 'watch this one',
+          entities: [{ type: 'text_link', offset: 6, length: 8, url: 'https://example.com/v/1' }],
+        }),
       ),
-    ).toBeNull();
-    expect(extractDownloadUrl(message({ video: {} as never }))).toBeNull();
+    ).toEqual({ url: 'https://example.com/v/1', note: 'watch this one' });
+  });
+
+  it('lifts out a link found without entities', () => {
+    expect(extractDownloadRequest(message({ text: 'see http://example.com/a.mp4 now' }))?.note).toBe(
+      'see now',
+    );
+  });
+});
+
+describe('downloadCaption', () => {
+  const url = 'https://www.example.com/clip';
+  const titled = { title: 'A Very Good Clip' };
+
+  it('names the media and credits the source', () => {
+    expect(downloadCaption(titled, url, '', true)).toBe(
+      '<b>A Very Good Clip</b>\n🔗 Source: <a href="https://www.example.com/clip">example.com</a>',
+    );
+  });
+
+  it('prefers what the sender wrote to the scraped title', () => {
+    expect(downloadCaption(titled, url, 'look at this', true)).toBe(
+      'look at this\n🔗 Source: <a href="https://www.example.com/clip">example.com</a>',
+    );
+  });
+
+  it('keeps the source line when the site offered no title', () => {
+    expect(downloadCaption({ title: null }, url, '', true)).toBe(
+      '🔗 Source: <a href="https://www.example.com/clip">example.com</a>',
+    );
+  });
+
+  it('drops the title and the source when metadata is turned off', () => {
+    expect(downloadCaption(titled, url, 'look at this', false)).toBe('look at this');
+  });
+
+  it('leaves a bare link with no caption at all when metadata is off', () => {
+    expect(downloadCaption(titled, url, '', false)).toBe('');
+  });
+
+  it('escapes what the sender and the site wrote', () => {
+    expect(downloadCaption({ title: '<b>hi</b>' }, url, '', true)).toContain(
+      '<b>&lt;b&gt;hi&lt;/b&gt;</b>',
+    );
+    expect(downloadCaption(titled, url, 'a & b <c>', true)).toContain('a &amp; b &lt;c&gt;');
+  });
+
+  it('defuses a quote that would end the href early', () => {
+    const caption = downloadCaption({ title: null }, 'https://example.com/a"onmouseover=x', '', true);
+
+    expect(caption).toContain('href="https://example.com/a%22onmouseover=x"');
+  });
+
+  it('shortens a note that would crowd out the footer', () => {
+    const caption = downloadCaption({ title: null }, url, 'x'.repeat(900), true);
+
+    expect(caption.split('\n')[0]).toHaveLength(500);
   });
 });
 

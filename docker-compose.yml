@@ -7,6 +7,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      # V8 sizes its heap from the *host's* memory unless told otherwise, which
+      # is what makes an idle container look like it is holding on to gigabytes.
+      # This app's own working set is a few MB; the rest of the allowance below
+      # is there for yt-dlp and ffmpeg, which run as separate processes.
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=192}
       # Shared secret for every /api call. Leave empty only on a private host.
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       # Bootstrap values, used only the first time the database is created —
@@ -21,6 +26,15 @@ services:
       # what makes it survive a redeploy. The container runs as a non-root user,
       # so this path must be writable by it.
       - "${DATA_DIR:-./data}:/app/data"
+    # A hard ceiling for the whole container — the server *and* the yt-dlp and
+    # ffmpeg it spawns. Downloading and merging a 50 MB video is the peak; 512M
+    # covers it with room to spare, and the kernel OOM-kills the container if
+    # this is set too low, so lower it only if you have watched it hold.
+    deploy:
+      resources:
+        limits:
+          memory: ${MEMORY_LIMIT:-512M}
+          cpus: ${CPU_LIMIT:-2}
     healthcheck:
       # 127.0.0.1 (not localhost): the server binds IPv4, and localhost can
       # resolve to IPv6 ::1 inside the container, which would refuse-connect.

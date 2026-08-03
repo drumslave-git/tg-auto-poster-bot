@@ -20,18 +20,20 @@ import {
   truncate,
 } from '../util/format.js';
 import { bufferAlbumMessage } from './albumBuffer.js';
-import { describe } from './capture.js';
+import { captureText, describe } from './capture.js';
 import {
   MAX_DOWNLOAD_BYTES,
   type Download,
+  downloadCaption,
   downloadMedia,
-  extractDownloadUrl,
+  extractDownloadRequest,
 } from './download.js';
 
 const INTRO = [
   'Send me any message — text, photo, video, album, file — and it goes into the queue.',
-  `Send just a link and I download the media behind it (up to ${formatBytes(MAX_DOWNLOAD_BYTES)}) ` +
-    'and queue that instead of the link.',
+  `Send a link and I download the media behind it (up to ${formatBytes(MAX_DOWNLOAD_BYTES)}) ` +
+    'and queue that instead of the link. Write something alongside the link and ' +
+    'it becomes the caption.',
 ].join('\n');
 
 const SHARED_COMMANDS = [
@@ -95,6 +97,7 @@ async function replySchedule(ctx: Context, prefix?: string): Promise<void> {
 async function queueMessages(ctx: Context, messages: Message[]): Promise<void> {
   const first = messages[0]!;
   const { contentType, preview } = describe(messages);
+  const { text, entities } = captureText(messages);
 
   enqueue({
     sourceChatId: String(first.chat.id),
@@ -102,6 +105,8 @@ async function queueMessages(ctx: Context, messages: Message[]): Promise<void> {
     kind: messages.length > 1 ? 'album' : 'single',
     contentType,
     preview,
+    sourceText: text,
+    sourceEntities: entities,
   });
 
   await syncQueueHead(ctx.api);
@@ -123,34 +128,18 @@ function replyTo(message: Message): ReplyTo {
   };
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host.replace(/^www\./, '');
-  } catch {
-    return 'source';
-  }
-}
-
-/** Names the media and credits where it came from — this travels to the channel. */
-function downloadCaption(download: Download, url: string): string {
-  // A double quote would end the href attribute early; nothing else in a URL
-  // upsets Telegram's HTML parser once the three escaped characters are gone.
-  const href = escapeHtml(url).replace(/"/g, '%22');
-  const lines = download.title ? [`<b>${escapeHtml(truncate(download.title, 200))}</b>`] : [];
-  lines.push(`🔗 Source: <a href="${href}">${escapeHtml(hostOf(url))}</a>`);
-  return lines.join('\n');
-}
-
 async function sendDownload(
   ctx: Context,
   message: Message,
   url: string,
+  note: string,
   download: Download,
 ): Promise<Message> {
   const file = new InputFile(download.file);
+  const caption = downloadCaption(download, url, note, getSettings().downloadMetadata);
   const options = {
-    caption: downloadCaption(download, url),
-    parse_mode: 'HTML' as const,
+    // A caption of `''` is not the same as none; Telegram wants the field gone.
+    ...(caption ? { caption, parse_mode: 'HTML' as const } : {}),
     ...replyTo(message),
   };
   const { duration, width, height } = download;
@@ -178,19 +167,30 @@ async function reportDownloadFailure(
   ctx: Context,
   message: Message,
   error: string,
+  queuingRaw = false,
 ): Promise<void> {
-  await ctx.reply(
-    `⚠️ Nothing queued — I could not get media from that link.\n\n<code>${escapeHtml(error)}</code>`,
-    { parse_mode: 'HTML', ...replyTo(message) },
-  );
+  const lead = queuingRaw
+    ? '⚠️ I could not get media from that link — queueing your message as it is.'
+    : '⚠️ Nothing queued — I could not get media from that link.';
+
+  await ctx.reply(`${lead}\n\n<code>${escapeHtml(error)}</code>`, {
+    parse_mode: 'HTML',
+    ...replyTo(message),
+  });
 }
 
 /**
- * A bare link is not the post — the media behind it is. We download it, reply to
- * the link with the file, and queue that reply; the link message itself is left
- * out of the queue entirely.
+ * A link is not the post — the media behind it is. We download it, reply to the
+ * link with the file, and queue that reply; the link message itself is left out
+ * of the queue entirely. Words sent with the link become the file's caption and
+ * travel to the channel with it.
  */
-async function handleLink(ctx: Context, message: Message, url: string): Promise<void> {
+async function handleLink(
+  ctx: Context,
+  message: Message,
+  url: string,
+  note: string,
+): Promise<void> {
   const status = await ctx
     .reply('⏳ Downloading the media behind that link…', replyTo(message))
     .catch(() => null);
@@ -202,19 +202,25 @@ async function handleLink(ctx: Context, message: Message, url: string): Promise<
     await ctx.api.deleteMessage(status.chat.id, status.message_id).catch(() => undefined);
   }
 
+  // Falling back means the sender's message goes into the queue exactly as they
+  // wrote it, link and all — a post nobody has to send twice.
+  const queueRaw = getSettings().queueRawOnFailure;
+  const giveUp = async (error: string): Promise<void> => {
+    await reportDownloadFailure(ctx, message, error, queueRaw);
+    if (queueRaw) await queueMessages(ctx, [message]);
+  };
+
   if (!result.ok) {
-    await reportDownloadFailure(ctx, message, result.error);
+    await giveUp(result.error);
     return;
   }
 
   try {
-    const sent = await sendDownload(ctx, message, url, result.download);
+    const sent = await sendDownload(ctx, message, url, note, result.download);
     await queueMessages(ctx, [sent]);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    await reportDownloadFailure(
-      ctx,
-      message,
+    await giveUp(
       `Downloaded ${formatBytes(result.download.bytes)}, but sending it here failed: ${reason}`,
     );
   } finally {
@@ -362,14 +368,21 @@ export function registerHandlers(bot: Bot): void {
       `Delay: <b>${schedule.delayMinutes}</b> min`,
     ];
 
+    if (schedule.window) {
+      lines.push(`Window: <b>${schedule.window.start}–${schedule.window.end}</b>`);
+    }
+
     if (schedule.nextPostAt && schedule.queueCount > 0) {
       lines.push(
         `Next post: <b>${escapeHtml(formatInTimezone(schedule.nextPostAt, timezone))}</b>` +
           ` (in ${formatDuration(schedule.msRemaining)})`,
       );
-      const emptyAt = new Date(schedule.nextPostAt.getTime() + (schedule.queueCount - 1) * schedule.delayMinutes * 60_000);
       lines.push(`Runway: <b>${formatDuration(runwayMs)}</b> of content`);
-      lines.push(`Queue empties: <b>${escapeHtml(formatInTimezone(emptyAt, timezone))}</b>`);
+      if (schedule.queueEmptiesAt) {
+        lines.push(
+          `Queue empties: <b>${escapeHtml(formatInTimezone(schedule.queueEmptiesAt, timezone))}</b>`,
+        );
+      }
     } else if (schedule.blocked) {
       lines.push(`⚠️ ${escapeHtml(schedule.blocked)}`);
     }
@@ -403,10 +416,10 @@ export function registerHandlers(bot: Bot): void {
       return;
     }
 
-    // A link on its own stands for the media behind it, not for itself.
-    const url = extractDownloadUrl(message);
-    if (url) {
-      await handleLink(ctx, message, url);
+    // A link stands for the media behind it, not for itself.
+    const request = extractDownloadRequest(message);
+    if (request) {
+      await handleLink(ctx, message, request.url, request.note);
       return;
     }
 

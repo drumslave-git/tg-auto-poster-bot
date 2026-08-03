@@ -45,6 +45,13 @@ export async function buildSnapshot() {
       timezone: settings.timezone,
       targetChannelId: settings.targetChannelId,
       paused: settings.paused,
+      queueRawOnFailure: settings.queueRawOnFailure,
+      downloadMetadata: settings.downloadMetadata,
+      postFooter: settings.postFooter ?? '',
+      // Clock times rather than minutes: this is what the dashboard's time
+      // inputs speak, and null on either side means "post at any hour".
+      windowStart: schedule.window?.start ?? null,
+      windowEnd: schedule.window?.end ?? null,
       hasToken: Boolean(settings.botToken),
       tokenMask: maskToken(settings.botToken),
     },
@@ -62,12 +69,8 @@ export async function buildSnapshot() {
       targetChannelId: schedule.targetChannelId,
       targetChannelTitle: schedule.targetChannelTitle,
       runwayMs,
-      queueEmptiesAt:
-        schedule.nextPostAt && pending > 0
-          ? new Date(
-              schedule.nextPostAt.getTime() + (pending - 1) * settings.delayMinutes * 60_000,
-            ).toISOString()
-          : null,
+      queueEmptiesAt: schedule.queueEmptiesAt?.toISOString() ?? null,
+      window: schedule.window,
     },
     scheduler: schedulerState(),
     /** The yt-dlp / ffmpeg pair that turns a link into a post. */

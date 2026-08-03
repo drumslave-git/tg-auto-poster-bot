@@ -13,9 +13,12 @@ import {
 } from '../services/queue.js';
 import {
   MAX_DELAY_MINUTES,
+  MAX_FOOTER_LENGTH,
   MIN_DELAY_MINUTES,
+  getSettings,
   isValidTelegramId,
   isValidTimezone,
+  postingWindow,
   updateSettings,
   type SettingsPatch,
 } from '../services/settings.js';
@@ -29,10 +32,34 @@ import {
   removeUser,
   setRole,
 } from '../services/users.js';
+import { formatClock, parseClock } from '../util/time.js';
 import { buildSnapshot, maskToken } from './snapshot.js';
 import { streamState } from './stream.js';
 
 export const api = Router();
+
+/**
+ * One end of the posting window: `HH:MM`, or empty to clear it. Returns
+ * `undefined` for "the request did not mention this one".
+ */
+function readClock(
+  body: Record<string, unknown>,
+  key: 'windowStart' | 'windowEnd',
+  errors: string[],
+): number | null | undefined {
+  if (!(key in body)) return undefined;
+
+  const raw = body[key];
+  const value = raw === null ? '' : String(raw).trim();
+  if (!value) return null;
+
+  const minutes = parseClock(value);
+  if (minutes === null) {
+    errors.push(`${key} must be a time of day like 13:00`);
+    return undefined;
+  }
+  return minutes;
+}
 
 api.get('/status', async (_req, res) => {
   res.json(await buildSnapshot());
@@ -69,9 +96,40 @@ api.put('/settings', async (req, res) => {
     patch.targetChannelId = value || null;
   }
 
-  if ('paused' in body) {
-    if (typeof body.paused !== 'boolean') errors.push('paused must be a boolean');
-    else patch.paused = body.paused;
+  for (const key of ['paused', 'queueRawOnFailure', 'downloadMetadata'] as const) {
+    if (!(key in body)) continue;
+    if (typeof body[key] !== 'boolean') errors.push(`${key} must be a boolean`);
+    else patch[key] = body[key];
+  }
+
+  if ('postFooter' in body) {
+    const value = String(body.postFooter ?? '').trim();
+    if (value.length > MAX_FOOTER_LENGTH) {
+      errors.push(`postFooter must be at most ${MAX_FOOTER_LENGTH} characters`);
+    } else {
+      patch.postFooter = value || null;
+    }
+  }
+
+  const windowStart = readClock(body, 'windowStart', errors);
+  const windowEnd = readClock(body, 'windowEnd', errors);
+  if (windowStart !== undefined) patch.windowStart = windowStart;
+  if (windowEnd !== undefined) patch.windowEnd = windowEnd;
+
+  // A window needs both ends. They are checked against what the row will hold
+  // once patched, so sending only one of them still has to add up.
+  if (errors.length === 0 && (windowStart !== undefined || windowEnd !== undefined)) {
+    const current = getSettings();
+    // `null` here means "clear it", so undefined is the only thing that falls
+    // back to the stored value.
+    const start = windowStart === undefined ? current.windowStart : windowStart;
+    const end = windowEnd === undefined ? current.windowEnd : windowEnd;
+
+    if ((start === null) !== (end === null)) {
+      errors.push('windowStart and windowEnd must both be set, or both cleared');
+    } else if (start !== null && start === end) {
+      errors.push('windowStart and windowEnd must differ');
+    }
   }
 
   // Absent means "leave unchanged"; empty string means "clear".
@@ -100,6 +158,8 @@ api.put('/settings', async (req, res) => {
     await botManager.apply(updated.botToken);
   }
 
+  const window = postingWindow(updated);
+
   res.json({
     ok: true,
     bot: botManager.getState(),
@@ -108,6 +168,11 @@ api.put('/settings', async (req, res) => {
       timezone: updated.timezone,
       targetChannelId: updated.targetChannelId,
       paused: updated.paused,
+      queueRawOnFailure: updated.queueRawOnFailure,
+      downloadMetadata: updated.downloadMetadata,
+      postFooter: updated.postFooter ?? '',
+      windowStart: window ? formatClock(window.start) : null,
+      windowEnd: window ? formatClock(window.end) : null,
       hasToken: Boolean(updated.botToken),
       tokenMask: maskToken(updated.botToken),
     },

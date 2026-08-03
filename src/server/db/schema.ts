@@ -1,3 +1,4 @@
+import type { MessageEntity } from 'grammy/types';
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
@@ -13,6 +14,32 @@ export const settings = sqliteTable('settings', {
   timezone: text('timezone').notNull().default('UTC'),
   /** While paused the scheduler skips its ticks; manual posting still works. */
   paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  /**
+   * Appended to every post that goes to the channel — a standing sign-off like
+   * "Subscribe to my awesome channel!". Null or empty means no footer.
+   */
+  postFooter: text('post_footer'),
+  /**
+   * The hours of the day posting is allowed in, as minutes since local midnight
+   * in `timezone`. Null on either one means "any time"; `start > end` is a
+   * window that wraps past midnight, e.g. 22:00 → 02:00.
+   */
+  windowStart: integer('window_start_minutes'),
+  windowEnd: integer('window_end_minutes'),
+  /**
+   * What to do with a link whose media could not be downloaded. Off: nothing is
+   * queued and the sender is told why. On: the message they sent is queued as
+   * it stands, link and all, so the post is not lost.
+   */
+  queueRawOnFailure: integer('queue_raw_on_failure', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  /**
+   * Whether a downloaded post carries the title yt-dlp scraped and a `🔗 Source`
+   * link back to where it came from. Off leaves the sender's own words alone as
+   * the whole caption.
+   */
+  downloadMetadata: integer('download_metadata', { mode: 'boolean' }).notNull().default(true),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -75,6 +102,14 @@ export const posts = sqliteTable('posts', {
   /** text | photo | video | animation | document | audio | voice | sticker | poll | ... */
   contentType: text('content_type').notNull().default('text'),
   preview: text('preview').notNull().default(''),
+  /**
+   * The sender's own words, verbatim, and the formatting that goes with them —
+   * what the footer is appended to when the post is published. `''` is a post
+   * that carries no words; null is a row from before the bot kept them, whose
+   * caption must be left alone because we cannot rebuild it.
+   */
+  sourceText: text('source_text'),
+  sourceEntities: text('source_entities', { mode: 'json' }).$type<MessageEntity[]>(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
     .notNull()
     .$defaultFn(() => new Date()),

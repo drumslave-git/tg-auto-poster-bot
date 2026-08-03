@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Message } from 'grammy/types';
 import { YT_DLP, exclusiveYtDlp, summarizeYtDlpError } from '../services/tools.js';
 import { type CommandResult, runCommand } from '../util/exec.js';
-import { formatBytes } from '../util/format.js';
+import { escapeHtml, formatBytes, truncate, truncateLines } from '../util/format.js';
 import { privateHostReason } from '../util/network.js';
 import { detectContentType } from './capture.js';
 
@@ -58,12 +58,34 @@ function normalizeUrl(raw: string): string | null {
 }
 
 /**
- * The link to download from, or null when this message is not just a link.
+ * Whatever the sender wrote around the link, tidied into a caption: the runs of
+ * spaces left behind by lifting the URL out close up, and the line breaks they
+ * chose survive.
+ */
+function tidyNote(value: string): string {
+  return value
+    .replace(/[^\S\n]+/g, ' ')
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export type DownloadRequest = {
+  url: string;
+  /** What the sender wrote besides the link, or `''` when the link stood alone. */
+  note: string;
+};
+
+/**
+ * The link to download from and the words around it, or null when this message
+ * is not a link at all.
  *
  * Only text-only messages qualify. A photo or video with a link in its caption
  * already *is* the post, so it goes to the queue untouched.
  */
-export function extractDownloadUrl(message: Message): string | null {
+export function extractDownloadRequest(message: Message): DownloadRequest | null {
   if (detectContentType(message) !== 'text') return null;
   const text = message.text;
   if (!text) return null;
@@ -76,16 +98,31 @@ export function extractDownloadUrl(message: Message): string | null {
 
   const first = entities[0];
   if (first) {
-    return normalizeUrl(
+    const url = normalizeUrl(
       first.type === 'text_link'
         ? first.url
         : text.slice(first.offset, first.offset + first.length),
     );
+    if (!url) return null;
+
+    // A `text_link` hides its URL behind words the sender picked, so the whole
+    // text is theirs. A plain `url` entity *is* the link — lift it out.
+    const note =
+      first.type === 'text_link'
+        ? text
+        : text.slice(0, first.offset) + text.slice(first.offset + first.length);
+
+    return { url, note: tidyNote(note) };
   }
 
   // Clients that send no entities (and plain API callers) still get a link.
   const match = URL_PATTERN.exec(text);
-  return match ? normalizeUrl(match[0]) : null;
+  if (!match) return null;
+  const url = normalizeUrl(match[0]);
+  if (!url) return null;
+
+  const note = text.slice(0, match.index) + text.slice(match.index + match[0].length);
+  return { url, note: tidyNote(note) };
 }
 
 export type MediaKind = 'video' | 'animation' | 'audio' | 'photo' | 'document';
@@ -230,6 +267,48 @@ async function largestFile(dir: string): Promise<{ file: string; bytes: number }
   }
 
   return best;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, '');
+  } catch {
+    return 'source';
+  }
+}
+
+/**
+ * Room the sender's own words get in the caption, leaving the source line and
+ * the standing footer their share of Telegram's 1024.
+ */
+const MAX_NOTE_LENGTH = 500;
+
+/**
+ * The caption the downloaded file travels to the channel with, as Telegram HTML.
+ *
+ * Anything the sender wrote alongside the link is their caption for it and
+ * stands in for the title yt-dlp scraped off the page. With metadata turned off
+ * their words are all that is left — and a link sent bare then yields no
+ * caption at all.
+ */
+export function downloadCaption(
+  download: Pick<Download, 'title'>,
+  url: string,
+  note: string,
+  withMetadata: boolean,
+): string {
+  // A double quote would end the href attribute early; nothing else in a URL
+  // upsets Telegram's HTML parser once the three escaped characters are gone.
+  const href = escapeHtml(url).replace(/"/g, '%22');
+  const lines: string[] = [];
+
+  if (note) lines.push(escapeHtml(truncateLines(note, MAX_NOTE_LENGTH)));
+  else if (withMetadata && download.title) {
+    lines.push(`<b>${escapeHtml(truncate(download.title, 200))}</b>`);
+  }
+
+  if (withMetadata) lines.push(`🔗 Source: <a href="${href}">${escapeHtml(hostOf(url))}</a>`);
+  return lines.join('\n');
 }
 
 export type Download = Metadata & {

@@ -1,4 +1,4 @@
-import type { Message } from 'grammy/types';
+import type { Message, MessageEntity } from 'grammy/types';
 import { truncate } from '../util/format.js';
 
 /** Best-effort label of what a message carries, used for the queue preview. */
@@ -32,4 +32,21 @@ export function describe(messages: Message[]): { contentType: string; preview: s
       : (first.poll?.question ?? first.document?.file_name ?? first.sticker?.emoji ?? '');
 
   return { contentType, preview: inner ? truncate(inner) : '' };
+}
+
+export type CapturedText = { text: string; entities: MessageEntity[] };
+
+/**
+ * The words the post carries, in full and with their formatting intact — unlike
+ * the preview, which is shortened for the dashboard. This is what a footer gets
+ * appended to at publishing time, so it has to be the message verbatim.
+ */
+export function captureText(messages: Message[]): CapturedText {
+  for (const message of messages) {
+    if (message.text) return { text: message.text, entities: message.entities ?? [] };
+    if (message.caption) {
+      return { text: message.caption, entities: message.caption_entities ?? [] };
+    }
+  }
+  return { text: '', entities: [] };
 }

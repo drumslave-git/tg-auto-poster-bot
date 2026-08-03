@@ -75,6 +75,34 @@ export function Field({
   );
 }
 
+/** A switch with its explanation, for the settings that are simply on or off. */
+export function Check({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: ReactNode;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3">
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 shrink-0 accent-sky-500"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="block">
+        <span className="block text-sm text-slate-200">{label}</span>
+        {hint && <span className="mt-0.5 block text-xs text-slate-500">{hint}</span>}
+      </span>
+    </label>
+  );
+}
+
 export const inputClass =
   'w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 placeholder-slate-600 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500';
 

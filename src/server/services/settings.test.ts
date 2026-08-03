@@ -27,6 +27,13 @@ describe('ensureSettings', () => {
     expect(created.timezone).toBe('UTC');
     expect(created.botToken).toBeNull();
     expect(created.paused).toBe(false);
+    expect(created.postFooter).toBeNull();
+    expect(created.windowStart).toBeNull();
+    expect(created.windowEnd).toBeNull();
+    // A failed download stays a failure unless asked otherwise; the title and
+    // source line have always been there, so they stay on by default.
+    expect(created.queueRawOnFailure).toBe(false);
+    expect(created.downloadMetadata).toBe(true);
   });
 
   it('never creates a second row', () => {
