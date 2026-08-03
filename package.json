@@ -1,6 +1,6 @@
 {
   "name": "tg-auto-poster-bot",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Telegram bot that auto-posts a queue of messages to a channel on a configurable delay, with a web dashboard.",
