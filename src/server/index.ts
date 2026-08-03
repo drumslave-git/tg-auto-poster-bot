@@ -3,6 +3,7 @@ import path from 'node:path';
 import express from 'express';
 import { api } from './api/routes.js';
 import { dashboardAuth } from './api/auth.js';
+import { closeStreams } from './api/stream.js';
 import { botManager } from './bot/manager.js';
 import { startScheduler, stopScheduler } from './bot/scheduler.js';
 import { runMigrations } from './db/index.js';
@@ -51,6 +52,8 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     console.log(`[server] ${signal} received, shutting down`);
+    // Open event streams never end on their own; server.close() would hang.
+    closeStreams();
     stopScheduler();
     await botManager.shutdown();
     server.close(() => process.exit(0));

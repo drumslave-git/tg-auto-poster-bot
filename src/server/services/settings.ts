@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { settings, type Settings } from '../db/schema.js';
 import { env } from '../env.js';
+import { notifyDashboard } from '../events.js';
 
 const SETTINGS_ID = 1;
 
@@ -51,6 +52,7 @@ export function updateSettings(patch: SettingsPatch): Settings {
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(settings.id, SETTINGS_ID))
     .run();
+  notifyDashboard();
   return getSettings();
 }
 

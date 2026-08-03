@@ -1,3 +1,4 @@
+import { notifyDashboard } from '../events.js';
 import { getSchedule, postNext, syncQueueHead } from '../services/poster.js';
 import { queueCount } from '../services/queue.js';
 import { botManager } from './manager.js';
@@ -31,22 +32,30 @@ async function tick(): Promise<void> {
   }
 }
 
+/** Runs a tick and tells the dashboard about its outcome either way. */
+async function runTick(label: string): Promise<void> {
+  try {
+    await tick();
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : String(error);
+    console.error(`[scheduler] ${label} failed`, error);
+  }
+  notifyDashboard();
+}
+
 export function startScheduler(): void {
   if (timer) return;
-  timer = setInterval(() => {
-    void tick().catch((error) => {
-      lastError = error instanceof Error ? error.message : String(error);
-      console.error('[scheduler] tick failed', error);
-    });
-  }, TICK_MS);
+  timer = setInterval(() => void runTick('tick'), TICK_MS);
   // Don't wait a full minute after a restart.
-  void tick().catch((error) => console.error('[scheduler] first tick failed', error));
+  void runTick('first tick');
+  notifyDashboard();
 }
 
 export function stopScheduler(): void {
   if (!timer) return;
   clearInterval(timer);
   timer = null;
+  notifyDashboard();
 }
 
 export function schedulerState(): { running: boolean; lastTickAt: Date | null; lastError: string | null } {

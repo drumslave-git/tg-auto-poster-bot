@@ -2,6 +2,7 @@ import { and, asc, count, eq, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users, type Role, type User } from '../db/schema.js';
 import { env } from '../env.js';
+import { notifyDashboard } from '../events.js';
 
 export const ROLES: Role[] = ['admin', 'manager'];
 
@@ -50,24 +51,30 @@ export function hasNoUsers(): boolean {
 }
 
 export function addUser(telegramId: string, role: Role, label?: string | null): User {
-  return db
+  const row = db
     .insert(users)
     .values({ telegramId, role, label: label ?? null, createdAt: new Date() })
     .returning()
     .get();
+  notifyDashboard();
+  return row;
 }
 
 export function setRole(telegramId: string, role: Role): User | undefined {
   db.update(users).set({ role }).where(eq(users.telegramId, telegramId)).run();
+  notifyDashboard();
   return getUser(telegramId);
 }
 
 export function setLabel(telegramId: string, label: string | null): void {
   db.update(users).set({ label }).where(eq(users.telegramId, telegramId)).run();
+  notifyDashboard();
 }
 
 export function removeUser(telegramId: string): boolean {
-  return db.delete(users).where(eq(users.telegramId, telegramId)).run().changes > 0;
+  const removed = db.delete(users).where(eq(users.telegramId, telegramId)).run().changes > 0;
+  if (removed) notifyDashboard();
+  return removed;
 }
 
 /**

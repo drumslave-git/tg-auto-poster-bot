@@ -1,6 +1,7 @@
 import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { channels, type Channel } from '../db/schema.js';
+import { notifyDashboard } from '../events.js';
 
 export type ChannelUpsert = {
   chatId: string;
@@ -36,11 +37,13 @@ export function upsertChannel(input: ChannelUpsert): void {
       },
     })
     .run();
+  notifyDashboard();
 }
 
 /** Records channel activity — this is what the delay is measured from. */
 export function touchLastPost(chatId: string, at: Date): void {
   db.update(channels).set({ lastPostAt: at }).where(eq(channels.chatId, chatId)).run();
+  notifyDashboard();
 }
 
 export function getChannel(chatId: string): Channel | undefined {

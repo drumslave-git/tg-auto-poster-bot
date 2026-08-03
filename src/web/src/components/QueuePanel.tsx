@@ -1,34 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { apiClient } from '../api';
 import { formatDateTime, typeIcon } from '../format';
-import type { QueueItem, Status } from '../types';
+import type { Status } from '../types';
 import { Button, Card, Empty } from './ui';
 
-export function QueuePanel({
-  status,
-  refreshToken,
-  onChanged,
-}: {
-  status: Status;
-  refreshToken: number;
-  onChanged: () => void;
-}) {
-  const [items, setItems] = useState<QueueItem[]>([]);
+export function QueuePanel({ status, onChanged }: { status: Status; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .queue()
-      .then((data) => {
-        if (!cancelled) setItems(data.items);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshToken]);
+  // Part of the pushed snapshot, so the list updates itself.
+  const items = status.queue;
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);

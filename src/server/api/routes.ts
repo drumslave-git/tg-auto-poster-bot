@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { botManager } from '../bot/manager.js';
-import { schedulerState } from '../bot/scheduler.js';
-import { listChannels, upsertChannel } from '../services/channels.js';
-import { getSchedule, postNext, syncQueueHead } from '../services/poster.js';
+import { upsertChannel } from '../services/channels.js';
+import { postNext, syncQueueHead } from '../services/poster.js';
+import { clearProfiles, forgetProfile, resolveProfile, usersWithProfiles } from '../services/profiles.js';
 import {
   clearQueue,
   listQueue,
@@ -14,7 +14,6 @@ import {
 import {
   MAX_DELAY_MINUTES,
   MIN_DELAY_MINUTES,
-  getSettings,
   isValidTelegramId,
   isValidTimezone,
   updateSettings,
@@ -26,111 +25,23 @@ import {
   blocksLastAdmin,
   getUser,
   isRole,
-  listUsers,
   removeUser,
   setRole,
 } from '../services/users.js';
-import { authRequired } from './auth.js';
+import { buildSnapshot, maskToken } from './snapshot.js';
+import { streamState } from './stream.js';
 
 export const api = Router();
 
-function maskToken(token: string | null): string | null {
-  if (!token) return null;
-  const [id] = token.split(':');
-  return `${id ?? ''}:${'•'.repeat(8)}${token.slice(-4)}`;
-}
-
-/** getChat is a network call; these profiles barely change. */
-type Profile = { username?: string; firstName?: string } | null;
-const profileCache = new Map<string, { at: number; value: Profile }>();
-const PROFILE_TTL_MS = 5 * 60_000;
-
-async function resolveProfile(telegramId: string): Promise<Profile> {
-  const cached = profileCache.get(telegramId);
-  if (cached && Date.now() - cached.at < PROFILE_TTL_MS) return cached.value;
-
-  const api = botManager.getApi();
-  if (!api) return cached?.value ?? null;
-
-  let value: Profile = null;
-  try {
-    const chat = await api.getChat(telegramId);
-    if (chat.type === 'private') value = { username: chat.username, firstName: chat.first_name };
-  } catch {
-    // Unknown until that user has messaged the bot — fall back to the cached label.
-  }
-  profileCache.set(telegramId, { at: Date.now(), value });
-  return value;
-}
-
-/** Users with their live Telegram profile where we can get one. */
-async function usersWithProfiles() {
-  const rows = listUsers();
-  return Promise.all(
-    rows.map(async (user) => {
-      const profile = await resolveProfile(user.telegramId);
-      return {
-        telegramId: user.telegramId,
-        role: user.role,
-        label: user.label,
-        createdAt: user.createdAt,
-        username: profile?.username ?? null,
-        firstName: profile?.firstName ?? null,
-      };
-    }),
-  );
-}
-
 api.get('/status', async (_req, res) => {
-  const settings = getSettings();
-  const schedule = getSchedule();
-  const pending = schedule.queueCount;
-  const runwayMs = pending * settings.delayMinutes * 60_000;
-  const users = await usersWithProfiles();
-  const botState = botManager.getState();
-
-  res.json({
-    serverTime: new Date().toISOString(),
-    authRequired: authRequired(),
-    bot: {
-      status: botState.status,
-      error: botState.error,
-      username: botState.info?.username ?? null,
-      firstName: botState.info?.first_name ?? null,
-      id: botState.info?.id ?? null,
-    },
-    users,
-    settings: {
-      delayMinutes: settings.delayMinutes,
-      timezone: settings.timezone,
-      targetChannelId: settings.targetChannelId,
-      paused: settings.paused,
-      hasToken: Boolean(settings.botToken),
-      tokenMask: maskToken(settings.botToken),
-    },
-    channels: listChannels(),
-    stats: {
-      queueCount: pending,
-      postedCount: postedCount(),
-      lastPostAt: schedule.lastPostAt?.toISOString() ?? null,
-      nextPostAt: schedule.nextPostAt?.toISOString() ?? null,
-      msRemaining: schedule.msRemaining,
-      dueNow: schedule.dueNow,
-      paused: schedule.paused,
-      blocked: schedule.blocked,
-      targetChannelId: schedule.targetChannelId,
-      targetChannelTitle: schedule.targetChannelTitle,
-      runwayMs,
-      queueEmptiesAt:
-        schedule.nextPostAt && pending > 0
-          ? new Date(
-              schedule.nextPostAt.getTime() + (pending - 1) * settings.delayMinutes * 60_000,
-            ).toISOString()
-          : null,
-    },
-    scheduler: schedulerState(),
-  });
+  res.json(await buildSnapshot());
 });
+
+/**
+ * Live dashboard: the same snapshot, pushed whenever it changes. Clients that
+ * cannot hold the stream open keep working through `GET /status`.
+ */
+api.get('/events', streamState);
 
 api.put('/settings', async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
@@ -184,8 +95,7 @@ api.put('/settings', async (req, res) => {
 
   const updated = updateSettings(patch);
   if (tokenChanged) {
-    // A different bot means different profile lookups.
-    profileCache.clear();
+    clearProfiles();
     await botManager.apply(updated.botToken);
   }
 
@@ -271,7 +181,7 @@ api.delete('/users/:telegramId', async (req, res) => {
   }
 
   removeUser(telegramId);
-  profileCache.delete(telegramId);
+  forgetProfile(telegramId);
   res.json({ ok: true, users: await usersWithProfiles() });
 });
 

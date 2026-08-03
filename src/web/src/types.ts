@@ -63,6 +63,7 @@ export type Status = {
     tokenMask: string | null;
   };
   channels: Channel[];
+  queue: QueueItem[];
   stats: {
     queueCount: number;
     postedCount: number;

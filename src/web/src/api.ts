@@ -18,13 +18,17 @@ export function setPassword(value: string): void {
   else localStorage.removeItem(PASSWORD_KEY);
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export function authHeaders(): Record<string, string> {
   const password = getPassword();
+  return password ? { 'x-dashboard-password': password } : {};
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(password ? { 'x-dashboard-password': password } : {}),
+      ...authHeaders(),
       ...init?.headers,
     },
   });

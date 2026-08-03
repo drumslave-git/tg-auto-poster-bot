@@ -7,10 +7,9 @@ import { QueuePanel } from './components/QueuePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { UsersPanel } from './components/UsersPanel';
 import { Badge, Button, Stat } from './components/ui';
+import { subscribeToState } from './events';
 import { formatDateTime, formatRunway } from './format';
 import type { BotStatus, Status } from './types';
-
-const POLL_MS = 5000;
 
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -27,16 +26,20 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
+  /** Why the live stream is not connected, or null while it is. */
+  const [offline, setOffline] = useState<string | null>('Connecting…');
+  /** Bumped to re-open the stream, e.g. after the password was entered. */
+  const [session, setSession] = useState(0);
   const [pausing, setPausing] = useState(false);
 
+  // The server pushes a new snapshot on every change; this is only for the
+  // instant feedback after an action, and as a fallback while the stream is down.
   const refresh = useCallback(async () => {
     try {
       const next = await apiClient.status();
       setStatus(next);
       setLocked(false);
       setError(null);
-      setTick((value) => value + 1);
     } catch (err) {
       if (err instanceof UnauthorizedError) {
         setLocked(true);
@@ -46,15 +49,27 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    void refresh();
-    const id = setInterval(() => void refresh(), POLL_MS);
-    return () => clearInterval(id);
-  }, [refresh]);
+  useEffect(
+    () =>
+      subscribeToState({
+        onState: (next) => {
+          setStatus(next);
+          setLocked(false);
+        },
+        onOpen: () => setOffline(null),
+        onDown: (message) => setOffline(message),
+        onUnauthorized: () => {
+          setOffline(null);
+          setLocked(true);
+        },
+      }),
+    [session],
+  );
 
   const togglePaused = useCallback(
     async (paused: boolean) => {
       setPausing(true);
+      setError(null);
       try {
         await apiClient.setPaused(paused);
         await refresh();
@@ -67,12 +82,21 @@ export default function App() {
     [refresh],
   );
 
-  if (locked) return <PasswordGate onSubmit={() => void refresh()} />;
+  if (locked) {
+    return (
+      <PasswordGate
+        onSubmit={() => {
+          setLocked(false);
+          setSession((value) => value + 1);
+        }}
+      />
+    );
+  }
 
   if (!status) {
     return (
       <div className="flex min-h-full items-center justify-center text-sm text-slate-500">
-        {error ?? 'Loading…'}
+        {error ?? offline ?? 'Loading…'}
       </div>
     );
   }
@@ -97,6 +121,7 @@ export default function App() {
           <Badge tone={settings.paused ? 'amber' : scheduler.running ? 'green' : 'red'}>
             {settings.paused ? 'paused' : `scheduler ${scheduler.running ? 'on' : 'off'}`}
           </Badge>
+          {offline && <Badge tone="amber">reconnecting…</Badge>}
           <Button
             variant={settings.paused ? 'primary' : 'ghost'}
             disabled={pausing}
@@ -171,7 +196,7 @@ export default function App() {
         />
       </div>
 
-      <QueuePanel status={status} refreshToken={tick} onChanged={() => void refresh()} />
+      <QueuePanel status={status} onChanged={() => void refresh()} />
       <SettingsPanel status={status} onSaved={() => void refresh()} />
       <UsersPanel status={status} onChanged={() => void refresh()} />
       <ChannelsPanel status={status} onChanged={() => void refresh()} />

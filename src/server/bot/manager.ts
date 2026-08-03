@@ -1,5 +1,6 @@
 import { Bot, GrammyError, HttpError } from 'grammy';
 import type { UserFromGetMe } from 'grammy/types';
+import { notifyDashboard } from '../events.js';
 import { clearAlbumBuffers } from './albumBuffer.js';
 import { registerHandlers } from './handlers.js';
 
@@ -62,6 +63,7 @@ class BotManager {
   private async startInternal(token: string): Promise<void> {
     this.status = 'starting';
     this.error = null;
+    notifyDashboard();
 
     const bot = new Bot(token);
     registerHandlers(bot);
@@ -72,6 +74,7 @@ class BotManager {
       this.status = 'error';
       this.error = describeError(error);
       console.error('[bot] failed to start:', this.error);
+      notifyDashboard();
       return;
     }
 
@@ -79,12 +82,14 @@ class BotManager {
     this.info = bot.botInfo;
     this.status = 'running';
     console.log(`[bot] running as @${bot.botInfo.username}`);
+    notifyDashboard();
 
     // start() resolves only once the bot stops; deliberately not awaited.
     void bot.start({ allowed_updates: [...ALLOWED_UPDATES] }).catch((error) => {
       this.status = 'error';
       this.error = describeError(error);
       console.error('[bot] polling stopped:', this.error);
+      notifyDashboard();
     });
   }
 
@@ -95,6 +100,7 @@ class BotManager {
     this.info = null;
     this.status = 'stopped';
     this.error = null;
+    notifyDashboard();
     if (!bot) return;
     try {
       await bot.stop();

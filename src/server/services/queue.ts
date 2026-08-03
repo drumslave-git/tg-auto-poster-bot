@@ -1,6 +1,7 @@
 import { asc, count, desc, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { posts, queueItems, type Post, type QueueItem } from '../db/schema.js';
+import { notifyDashboard } from '../events.js';
 
 export type NewQueueItem = {
   sourceChatId: string;
@@ -11,11 +12,13 @@ export type NewQueueItem = {
 };
 
 export function enqueue(item: NewQueueItem): QueueItem {
-  return db
+  const row = db
     .insert(queueItems)
     .values({ ...item, createdAt: new Date() })
     .returning()
     .get();
+  notifyDashboard();
+  return row;
 }
 
 /** FIFO: the oldest item is always the next one out. */
@@ -32,11 +35,15 @@ export function queueCount(): number {
 }
 
 export function removeQueueItem(id: number): boolean {
-  return db.delete(queueItems).where(eq(queueItems.id, id)).run().changes > 0;
+  const removed = db.delete(queueItems).where(eq(queueItems.id, id)).run().changes > 0;
+  if (removed) notifyDashboard();
+  return removed;
 }
 
 export function clearQueue(): number {
-  return db.delete(queueItems).run().changes;
+  const removed = db.delete(queueItems).run().changes;
+  if (removed > 0) notifyDashboard();
+  return removed;
 }
 
 export function recordPost(post: {
@@ -47,7 +54,9 @@ export function recordPost(post: {
   mode: 'auto' | 'manual';
   postedAt: Date;
 }): Post {
-  return db.insert(posts).values(post).returning().get();
+  const row = db.insert(posts).values(post).returning().get();
+  notifyDashboard();
+  return row;
 }
 
 export function postedCount(): number {

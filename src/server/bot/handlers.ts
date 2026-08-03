@@ -97,7 +97,10 @@ async function queueMessages(ctx: Context, messages: Message[]): Promise<void> {
 
   const size = queueCount();
   const label = contentTypeLabel(contentType);
-  await replySchedule(ctx, `✅ Queued ${escapeHtml(label)} — <b>${size}</b> in queue.`);
+  // Just the confirmation — /till and /summary are there for the schedule.
+  await ctx.reply(`✅ Queued ${escapeHtml(label)} — <b>${size}</b> in queue.`, {
+    parse_mode: 'HTML',
+  });
 }
 
 export function registerHandlers(bot: Bot): void {

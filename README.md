@@ -86,8 +86,8 @@ thing standing between you and a bot nobody can configure.
 | `/summary` | Queue size, next post time, and total runway (queue × delay) | any |
 | `/help` | Command list for your role | any |
 
-Any non-command message is queued, and the bot replies with the new queue size and the
-time until the next post.
+Any non-command message is queued, and the bot replies with the new queue size. Use
+`/till` or `/summary` for the schedule.
 
 ## Pausing
 
@@ -123,6 +123,23 @@ published.
 If the channel has no recorded activity yet, the first queued item goes out on the next
 tick.
 
+## Live dashboard
+
+The dashboard never needs a refresh. It holds one server-sent-events stream open on
+`GET /api/events`, and the server pushes a full snapshot — bot state, settings, people,
+channels, queue, counters — whenever anything changes: a post queued from Telegram, a
+scheduler run, an edit made in another browser tab. Idle streams cost one small frame
+every 25 s.
+
+Changes made outside the app (a direct write to the database, say) are picked up by a
+revalidation pass every 5 s, so the stream never goes stale. `GET /api/status` still
+returns the same snapshot for anything that cannot hold a stream open, and the dashboard
+falls back to it while reconnecting — a dropped connection shows **reconnecting…** in the
+header and retries with backoff.
+
+The stream is read with `fetch` rather than `EventSource` so that `DASHBOARD_PASSWORD`
+travels in a header instead of the query string.
+
 ## Notes and limitations
 
 - **Nothing is re-uploaded.** A queued item is a reference to the original message in your
@@ -149,7 +166,7 @@ it needs to be reachable remotely.
 
 ```
 src/server
-  api/          Express routes + dashboard auth
+  api/          Express routes, dashboard auth, snapshot + SSE stream
   bot/          grammY bot: lifecycle, handlers, album buffer, scheduler
   db/           Drizzle schema and connection
   services/     settings, users/roles, queue, channels, posting logic
