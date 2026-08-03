@@ -51,40 +51,60 @@ export const channels = sqliteTable('channels', {
     .$defaultFn(() => new Date()),
 });
 
+export type PostKind = 'single' | 'album';
+export type PostMode = 'auto' | 'manual';
+
 /**
- * A pending post. We never re-upload media: the original message stays in the
- * admin's chat with the bot and gets `copyMessage`d to the channel when due.
+ * Every post the bot was given, queued and published alike — one row for the
+ * whole life of a post. A row starts out queued and is stamped in place when
+ * it goes out, so `posted_at IS NULL` is the queue and the rest is history.
+ *
+ * We never re-upload media: the original message stays in the sender's chat
+ * with the bot and gets `copyMessage`d to the channel when due. That is why
+ * the source ids live on the row alongside the ids of the published copies.
  */
-export const queueItems = sqliteTable('queue_items', {
+export const posts = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  sourceChatId: text('source_chat_id').notNull(),
-  messageIds: text('message_ids', { mode: 'json' }).$type<number[]>().notNull(),
-  /** single | album */
-  kind: text('kind').notNull().default('single'),
+  /**
+   * Where the original lives: the private chat between sender and bot. Null
+   * only on rows migrated from the old history table, which never kept it.
+   */
+  sourceChatId: text('source_chat_id'),
+  sourceMessageIds: text('source_message_ids', { mode: 'json' }).$type<number[]>(),
+  kind: text('kind').$type<PostKind>().notNull().default('single'),
   /** text | photo | video | animation | document | audio | voice | sticker | poll | ... */
   contentType: text('content_type').notNull().default('text'),
   preview: text('preview').notNull().default(''),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
     .notNull()
     .$defaultFn(() => new Date()),
-});
 
-/** History of what the bot published, for the "posted" counter and the log. */
-export const posts = sqliteTable('posts', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  channelId: text('channel_id').notNull(),
-  messageIds: text('message_ids', { mode: 'json' }).$type<number[]>().notNull(),
-  contentType: text('content_type').notNull().default('text'),
-  preview: text('preview').notNull().default(''),
-  /** auto | manual */
-  mode: text('mode').notNull().default('auto'),
-  postedAt: integer('posted_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .$defaultFn(() => new Date()),
+  // --- Filled in when the post is published; null while it is queued. -------
+  channelId: text('channel_id'),
+  channelMessageIds: text('channel_message_ids', { mode: 'json' }).$type<number[]>(),
+  mode: text('mode').$type<PostMode>(),
+  postedAt: integer('posted_at', { mode: 'timestamp_ms' }),
 });
 
 export type Settings = typeof settings.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Channel = typeof channels.$inferSelect;
-export type QueueItem = typeof queueItems.$inferSelect;
 export type Post = typeof posts.$inferSelect;
+
+/**
+ * A post still waiting to go out. Anything the queue creates has a source, so
+ * the queue helpers narrow to this and callers need no null checks.
+ */
+export type QueuedPost = Post & {
+  sourceChatId: string;
+  sourceMessageIds: number[];
+  postedAt: null;
+};
+
+/** A post that has been published. */
+export type PublishedPost = Post & {
+  channelId: string;
+  channelMessageIds: number[];
+  mode: PostMode;
+  postedAt: Date;
+};

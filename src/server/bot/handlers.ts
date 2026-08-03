@@ -87,7 +87,7 @@ async function queueMessages(ctx: Context, messages: Message[]): Promise<void> {
 
   enqueue({
     sourceChatId: String(first.chat.id),
-    messageIds: messages.map((m) => m.message_id),
+    sourceMessageIds: messages.map((m) => m.message_id),
     kind: messages.length > 1 ? 'album' : 'single',
     contentType,
     preview,

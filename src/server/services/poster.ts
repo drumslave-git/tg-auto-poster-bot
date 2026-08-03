@@ -1,8 +1,8 @@
 import type { Api } from 'grammy';
 import type { ReactionTypeEmoji } from 'grammy/types';
-import type { Channel, QueueItem } from '../db/schema.js';
+import type { Channel, QueuedPost } from '../db/schema.js';
 import { getChannel, postableChannels, touchLastPost } from './channels.js';
-import { peekNext, queueCount, recordPost, removeQueueItem } from './queue.js';
+import { peekNext, queueCount, recordPost } from './queue.js';
 import { getSettings } from './settings.js';
 
 export type TargetResolution =
@@ -119,7 +119,13 @@ export function getSchedule(now = new Date()): Schedule {
 }
 
 export type PostResult =
-  | { ok: true; channelId: string; messageIds: number[]; preview: string; contentType: string }
+  | {
+      ok: true;
+      channelId: string;
+      channelMessageIds: number[];
+      preview: string;
+      contentType: string;
+    }
   | { ok: false; error: string };
 
 let posting = false;
@@ -160,8 +166,8 @@ async function react(
 }
 
 /** Marks the original message as published. */
-async function markPosted(api: Api, item: QueueItem): Promise<void> {
-  await react(api, item.sourceChatId, item.messageIds[0]!, POSTED_EMOJI);
+async function markPosted(api: Api, item: QueuedPost): Promise<void> {
+  await react(api, item.sourceChatId, item.sourceMessageIds[0]!, POSTED_EMOJI);
 }
 
 /**
@@ -174,7 +180,7 @@ export async function syncQueueHead(api: Api): Promise<void> {
 
   const previous = markedHead;
   markedHead = head
-    ? { itemId: head.id, sourceChatId: head.sourceChatId, messageId: head.messageIds[0]! }
+    ? { itemId: head.id, sourceChatId: head.sourceChatId, messageId: head.sourceMessageIds[0]! }
     : null;
 
   // The old head left the queue without being posted (deleted, or the queue was
@@ -184,7 +190,7 @@ export async function syncQueueHead(api: Api): Promise<void> {
 }
 
 /** Replies to the original message with what went wrong. Never throws. */
-async function reportFailure(api: Api, item: QueueItem, error: string): Promise<void> {
+async function reportFailure(api: Api, item: QueuedPost, error: string): Promise<void> {
   if (reportedFailure?.itemId === item.id && reportedFailure.error === error) return;
   reportedFailure = { itemId: item.id, error };
 
@@ -193,7 +199,10 @@ async function reportFailure(api: Api, item: QueueItem, error: string): Promise<
       item.sourceChatId,
       `⚠️ Could not post this to the channel.\n\n${error}\n\nIt stays first in the queue and will be retried.`,
       {
-        reply_parameters: { message_id: item.messageIds[0]!, allow_sending_without_reply: true },
+        reply_parameters: {
+          message_id: item.sourceMessageIds[0]!,
+          allow_sending_without_reply: true,
+        },
       },
     );
   } catch (sendError) {
@@ -210,7 +219,7 @@ export async function postNext(api: Api, mode: 'auto' | 'manual'): Promise<PostR
   if (posting) return { ok: false, error: 'A post is already in progress.' };
   posting = true;
   // Kept outside the try so the catch below knows which post to reply to.
-  let item: QueueItem | undefined;
+  let item: QueuedPost | undefined;
   try {
     item = peekNext();
     if (!item) return { ok: false, error: 'Queue is empty.' };
@@ -225,24 +234,17 @@ export async function postNext(api: Api, mode: 'auto' | 'manual'): Promise<PostR
     const channelId = target.channel.chatId;
     let sentIds: number[];
 
-    if (item.messageIds.length > 1) {
-      const sent = await api.copyMessages(channelId, item.sourceChatId, item.messageIds);
+    if (item.sourceMessageIds.length > 1) {
+      const sent = await api.copyMessages(channelId, item.sourceChatId, item.sourceMessageIds);
       sentIds = sent.map((m) => m.message_id);
     } else {
-      const sent = await api.copyMessage(channelId, item.sourceChatId, item.messageIds[0]!);
+      const sent = await api.copyMessage(channelId, item.sourceChatId, item.sourceMessageIds[0]!);
       sentIds = [sent.message_id];
     }
 
+    // Stamping the row publishes it: it leaves the queue and enters the history.
     const postedAt = new Date();
-    removeQueueItem(item.id);
-    recordPost({
-      channelId,
-      messageIds: sentIds,
-      contentType: item.contentType,
-      preview: item.preview,
-      mode,
-      postedAt,
-    });
+    recordPost(item.id, { channelId, channelMessageIds: sentIds, mode, postedAt });
     // Restart the countdown immediately; the channel_post update may lag.
     touchLastPost(channelId, postedAt);
     if (reportedFailure?.itemId === item.id) reportedFailure = null;
@@ -254,7 +256,7 @@ export async function postNext(api: Api, mode: 'auto' | 'manual'): Promise<PostR
     return {
       ok: true,
       channelId,
-      messageIds: sentIds,
+      channelMessageIds: sentIds,
       preview: item.preview,
       contentType: item.contentType,
     };

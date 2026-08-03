@@ -23,22 +23,25 @@ export type User = {
   firstName: string | null;
 };
 
-export type QueueItem = {
+/**
+ * Queued and published posts are one table on the server; a post keeps its row
+ * and gains the channel columns when it goes out.
+ */
+type PostBase = {
   id: number;
   sourceChatId: string;
-  messageIds: number[];
+  sourceMessageIds: number[];
   kind: 'single' | 'album';
   contentType: string;
   preview: string;
   createdAt: number;
 };
 
-export type PostRecord = {
-  id: number;
+export type QueueItem = PostBase & { postedAt: null };
+
+export type PostRecord = PostBase & {
   channelId: string;
-  messageIds: number[];
-  contentType: string;
-  preview: string;
+  channelMessageIds: number[];
   mode: 'auto' | 'manual';
   postedAt: number;
 };

@@ -70,8 +70,10 @@ export function QueuePanel({ status, onChanged }: { status: Status; onChanged: (
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500">
                   {item.contentType}
-                  {item.messageIds.length > 1 ? ` · ${item.messageIds.length} items` : ''} · added{' '}
-                  {formatDateTime(item.createdAt, status.settings.timezone)}
+                  {item.sourceMessageIds.length > 1
+                    ? ` · ${item.sourceMessageIds.length} items`
+                    : ''}{' '}
+                  · added {formatDateTime(item.createdAt, status.settings.timezone)}
                 </p>
               </div>
               <Button
