@@ -36,6 +36,21 @@ RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 FROM base AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
+# yt-dlp lives here instead of in /usr/bin so the app user can replace it.
+ENV PATH="/app/bin:$PATH"
+
+# ffmpeg merges the separate video and audio streams most sites serve into one
+# mp4; python3 runs the yt-dlp zipapp below. Neither one self-updates — they
+# move forward when this image is rebuilt.
+RUN apk add --no-cache ffmpeg python3
+
+# Deliberately the official zipapp rather than the apk package: a
+# package-managed yt-dlp refuses to update itself, and extractors break often
+# enough that the app runs `yt-dlp -U` at boot and daily after that. Unpinned on
+# purpose — a stale yt-dlp is the failure mode worth avoiding here. The chown in
+# the next stage hands the file *and its directory* to the app user, which is
+# what the updater needs to swap it out.
+ADD --chmod=0755 https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp /app/bin/yt-dlp
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist

@@ -50,6 +50,15 @@ export function contentTypeLabel(contentType: string): string {
   return MEDIA_LABELS[contentType] ?? contentType;
 }
 
+/** Human file size, e.g. `48.6 MB`, `50 MB`, `823 KB`, `512 B`. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.max(0, Math.round(bytes))} B`;
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) return `${Math.round(kilobytes)} KB`;
+  // A round number reads better without the decimal: `50 MB`, not `50.0 MB`.
+  return `${(kilobytes / 1024).toFixed(1).replace(/\.0$/, '')} MB`;
+}
+
 export function truncate(value: string, max = 140): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;

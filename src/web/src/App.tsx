@@ -5,6 +5,7 @@ import { Countdown } from './components/Countdown';
 import { PasswordGate } from './components/PasswordGate';
 import { QueuePanel } from './components/QueuePanel';
 import { SettingsPanel } from './components/SettingsPanel';
+import { ToolsPanel } from './components/ToolsPanel';
 import { UsersPanel } from './components/UsersPanel';
 import { Badge, Button, Stat } from './components/ui';
 import { subscribeToState } from './events';
@@ -147,6 +148,11 @@ export default function App() {
           Last scheduler run: {scheduler.lastError}
         </p>
       )}
+      {status.tools.ytDlp.error && (
+        <p className="rounded-xl border border-amber-900 bg-amber-950/40 px-4 py-2 text-sm text-amber-300">
+          yt-dlp: {status.tools.ytDlp.error} Links stay un-postable until it is installed.
+        </p>
+      )}
 
       <Countdown status={status} />
 
@@ -200,6 +206,7 @@ export default function App() {
       <SettingsPanel status={status} onSaved={() => void refresh()} />
       <UsersPanel status={status} onChanged={() => void refresh()} />
       <ChannelsPanel status={status} onChanged={() => void refresh()} />
+      <ToolsPanel status={status} onChanged={() => void refresh()} />
 
       <footer className="pb-6 text-center text-xs text-slate-600">
         Server time {formatDateTime(status.serverTime, settings.timezone)} · {settings.timezone}

@@ -57,6 +57,7 @@ export const apiClient = {
   setPaused: (paused: boolean) =>
     request<{ ok: boolean }>('/settings', { method: 'PUT', body: JSON.stringify({ paused }) }),
   restartBot: () => request<{ ok: boolean }>('/bot/restart', { method: 'POST' }),
+  updateTools: () => request<Status & { ok: boolean }>('/tools/update', { method: 'POST' }),
   addUser: (telegramId: string, role: Role) =>
     request<UsersResponse>('/users', { method: 'POST', body: JSON.stringify({ telegramId, role }) }),
   setUserRole: (telegramId: string, role: Role) =>

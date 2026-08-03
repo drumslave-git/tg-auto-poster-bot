@@ -1,4 +1,4 @@
-import { Bot, type Context } from 'grammy';
+import { Bot, type Context, InputFile } from 'grammy';
 import type { Message } from 'grammy/types';
 import { upsertChannel, touchLastPost } from '../services/channels.js';
 import { getSchedule, postNext, syncQueueHead } from '../services/poster.js';
@@ -14,14 +14,25 @@ import { getUser, hasNoUsers, roleOf, setLabel } from '../services/users.js';
 import {
   contentTypeLabel,
   escapeHtml,
+  formatBytes,
   formatDuration,
   formatInTimezone,
   truncate,
 } from '../util/format.js';
 import { bufferAlbumMessage } from './albumBuffer.js';
 import { describe } from './capture.js';
+import {
+  MAX_DOWNLOAD_BYTES,
+  type Download,
+  downloadMedia,
+  extractDownloadUrl,
+} from './download.js';
 
-const INTRO = 'Send me any message — text, photo, video, album, link, file — and it goes into the queue.';
+const INTRO = [
+  'Send me any message — text, photo, video, album, file — and it goes into the queue.',
+  `Send just a link and I download the media behind it (up to ${formatBytes(MAX_DOWNLOAD_BYTES)}) ` +
+    'and queue that instead of the link.',
+].join('\n');
 
 const SHARED_COMMANDS = [
   '/queue — how many posts are waiting',
@@ -101,6 +112,114 @@ async function queueMessages(ctx: Context, messages: Message[]): Promise<void> {
   await ctx.reply(`✅ Queued ${escapeHtml(label)} — <b>${size}</b> in queue.`, {
     parse_mode: 'HTML',
   });
+}
+
+/** So the whole exchange about a link hangs off the link itself. */
+type ReplyTo = { reply_parameters: { message_id: number; allow_sending_without_reply: true } };
+
+function replyTo(message: Message): ReplyTo {
+  return {
+    reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+  };
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, '');
+  } catch {
+    return 'source';
+  }
+}
+
+/** Names the media and credits where it came from — this travels to the channel. */
+function downloadCaption(download: Download, url: string): string {
+  // A double quote would end the href attribute early; nothing else in a URL
+  // upsets Telegram's HTML parser once the three escaped characters are gone.
+  const href = escapeHtml(url).replace(/"/g, '%22');
+  const lines = download.title ? [`<b>${escapeHtml(truncate(download.title, 200))}</b>`] : [];
+  lines.push(`🔗 Source: <a href="${href}">${escapeHtml(hostOf(url))}</a>`);
+  return lines.join('\n');
+}
+
+async function sendDownload(
+  ctx: Context,
+  message: Message,
+  url: string,
+  download: Download,
+): Promise<Message> {
+  const file = new InputFile(download.file);
+  const options = {
+    caption: downloadCaption(download, url),
+    parse_mode: 'HTML' as const,
+    ...replyTo(message),
+  };
+  const { duration, width, height } = download;
+
+  switch (download.kind) {
+    case 'video':
+      return ctx.replyWithVideo(file, {
+        ...options,
+        supports_streaming: true,
+        ...(duration ? { duration } : {}),
+        ...(width && height ? { width, height } : {}),
+      });
+    case 'animation':
+      return ctx.replyWithAnimation(file, options);
+    case 'audio':
+      return ctx.replyWithAudio(file, { ...options, ...(duration ? { duration } : {}) });
+    case 'photo':
+      return ctx.replyWithPhoto(file, options);
+    default:
+      return ctx.replyWithDocument(file, options);
+  }
+}
+
+async function reportDownloadFailure(
+  ctx: Context,
+  message: Message,
+  error: string,
+): Promise<void> {
+  await ctx.reply(
+    `⚠️ Nothing queued — I could not get media from that link.\n\n<code>${escapeHtml(error)}</code>`,
+    { parse_mode: 'HTML', ...replyTo(message) },
+  );
+}
+
+/**
+ * A bare link is not the post — the media behind it is. We download it, reply to
+ * the link with the file, and queue that reply; the link message itself is left
+ * out of the queue entirely.
+ */
+async function handleLink(ctx: Context, message: Message, url: string): Promise<void> {
+  const status = await ctx
+    .reply('⏳ Downloading the media behind that link…', replyTo(message))
+    .catch(() => null);
+
+  const result = await downloadMedia(url);
+
+  // Our own progress note; the link and the outcome are what stay in the chat.
+  if (status) {
+    await ctx.api.deleteMessage(status.chat.id, status.message_id).catch(() => undefined);
+  }
+
+  if (!result.ok) {
+    await reportDownloadFailure(ctx, message, result.error);
+    return;
+  }
+
+  try {
+    const sent = await sendDownload(ctx, message, url, result.download);
+    await queueMessages(ctx, [sent]);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await reportDownloadFailure(
+      ctx,
+      message,
+      `Downloaded ${formatBytes(result.download.bytes)}, but sending it here failed: ${reason}`,
+    );
+  } finally {
+    await result.cleanup().catch(() => undefined);
+  }
 }
 
 export function registerHandlers(bot: Bot): void {
@@ -281,6 +400,13 @@ export function registerHandlers(bot: Bot): void {
       bufferAlbumMessage(message.media_group_id, message, (messages) => {
         void queueMessages(ctx, messages).catch((error) => console.error('[bot] album queue failed', error));
       });
+      return;
+    }
+
+    // A link on its own stands for the media behind it, not for itself.
+    const url = extractDownloadUrl(message);
+    if (url) {
+      await handleLink(ctx, message, url);
       return;
     }
 

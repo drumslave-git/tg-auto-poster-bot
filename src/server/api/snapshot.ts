@@ -5,6 +5,7 @@ import { getSchedule } from '../services/poster.js';
 import { usersWithProfiles } from '../services/profiles.js';
 import { listQueue, postedCount } from '../services/queue.js';
 import { getSettings } from '../services/settings.js';
+import { toolsState } from '../services/tools.js';
 import { authRequired } from './auth.js';
 
 export function maskToken(token: string | null): string | null {
@@ -24,6 +25,7 @@ export async function buildSnapshot() {
   const runwayMs = pending * settings.delayMinutes * 60_000;
   const users = await usersWithProfiles();
   const botState = botManager.getState();
+  const tools = toolsState();
 
   return {
     serverTime: new Date().toISOString(),
@@ -66,6 +68,21 @@ export async function buildSnapshot() {
           : null,
     },
     scheduler: schedulerState(),
+    /** The yt-dlp / ffmpeg pair that turns a link into a post. */
+    tools: {
+      ytDlp: tools.ytDlp,
+      ffmpeg: tools.ffmpeg,
+      checkedAt: tools.checkedAt?.toISOString() ?? null,
+      updating: tools.updating,
+      nextCheckAt: tools.nextCheckAt?.toISOString() ?? null,
+      lastUpdate: tools.lastUpdate
+        ? {
+            at: tools.lastUpdate.at.toISOString(),
+            outcome: tools.lastUpdate.outcome,
+            message: tools.lastUpdate.message,
+          }
+        : null,
+    },
   };
 }
 

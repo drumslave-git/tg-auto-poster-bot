@@ -9,6 +9,7 @@ import { startScheduler, stopScheduler } from './bot/scheduler.js';
 import { runMigrations } from './db/index.js';
 import { env } from './env.js';
 import { ensureSettings } from './services/settings.js';
+import { startToolMaintenance, stopToolMaintenance } from './services/tools.js';
 import { ensureUsers } from './services/users.js';
 
 async function main(): Promise<void> {
@@ -49,12 +50,16 @@ async function main(): Promise<void> {
 
   await botManager.apply(settings.botToken);
   startScheduler();
+  // Reads the media tool versions and updates yt-dlp; deliberately not awaited,
+  // since it reaches out to the network and nothing else waits on it.
+  startToolMaintenance();
 
   const shutdown = async (signal: string) => {
     console.log(`[server] ${signal} received, shutting down`);
     // Open event streams never end on their own; server.close() would hang.
     closeStreams();
     stopScheduler();
+    stopToolMaintenance();
     await botManager.shutdown();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();

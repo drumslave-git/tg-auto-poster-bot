@@ -1,8 +1,9 @@
 # Telegram auto-poster bot
 
-Send the bot anything — text, photos, videos, albums, files, links — and it queues it.
-Once the target channel has been quiet for the configured delay, the bot publishes the
-next item from the queue. A web dashboard shows the countdown, the queue, and every setting.
+Send the bot anything — text, photos, videos, albums, files — and it queues it. Send a
+link and it downloads the media behind it and queues that instead. Once the target
+channel has been quiet for the configured delay, the bot publishes the next item from the
+queue. A web dashboard shows the countdown, the queue, and every setting.
 
 ## Stack
 
@@ -90,6 +91,52 @@ thing standing between you and a bot nobody can configure.
 Any non-command message is queued, and the bot replies with the new queue size. Use
 `/till` or `/summary` for the schedule.
 
+## Links become media
+
+Send a link on its own and the link is not what gets queued — the media behind it is.
+The bot hands the URL to [yt-dlp](https://github.com/yt-dlp/yt-dlp), replies to your
+message with the downloaded file, and queues **that reply**. Your link message stays out
+of the queue entirely.
+
+The reply carries a caption with the title and a `🔗 Source:` link back to where it came
+from, and that caption travels to the channel with the post.
+
+- **50 MB ceiling.** That is all Telegram lets a bot upload, so it is also the download
+  limit. yt-dlp skips anything it knows is too big before spending bandwidth on it, and
+  the finished file is measured again — sites that report no size cannot sneak past.
+- **What you get**: a single video (never a whole playlist), preferring ≤1080p h264 in an
+  mp4 so Telegram plays it inline. Audio, images and GIFs are sent as their own kinds;
+  anything else goes as a file.
+- **If the download fails**, the bot replies to your link with yt-dlp's reason — private
+  video, unsupported site, over the limit, no media there — and **nothing is queued**.
+  Downloads run one at a time, so several links in a row are handled in order.
+- Only text-only messages count. A photo or video whose *caption* holds a link is already
+  a post and is queued untouched.
+
+### The tools behind it
+
+`yt-dlp` and `ffmpeg` are taken from `PATH` — there is nothing to configure. The Docker
+image ships both; for a local `npm run dev` install them yourself (`brew install yt-dlp
+ffmpeg`, `winget install yt-dlp.yt-dlp Gyan.FFmpeg`, or your distro's packages). Without
+yt-dlp a link gets a "not installed" reply instead of a post, and the dashboard says so.
+
+**Media tools** in the dashboard shows the installed version of each, when they were last
+read, and when the next check is due. Extractors break whenever a site changes, so the
+app runs `yt-dlp -U` at boot and once a day after that; **Update now** does it on demand.
+The panel reports what happened — updated, already current, or why not.
+
+Two things worth knowing about that:
+
+- The image installs yt-dlp as the official standalone release in `/app/bin`, owned by the
+  app user, because that is the only kind of install its updater will touch. A yt-dlp that
+  came from apt, apk, brew or pip reports `unsupported` in the dashboard and has to be
+  updated the same way it was installed — which is the normal state of affairs for a local
+  dev machine.
+- **ffmpeg has no self-update** — no build of it does — so the dashboard only reports its
+  version, and it moves forward when you pull a newer image. That costs nothing in
+  practice: ffmpeg just muxes the streams yt-dlp hands it, and that does not drift the way
+  extractors do.
+
 ## Pausing
 
 `/pause` (or **Pause posting** in the dashboard header) stops the automatic schedule.
@@ -148,6 +195,9 @@ travels in a header instead of the query string.
   message before it is published will make that item fail to post.
 - **Albums** are grouped back together: messages sharing a `media_group_id` are collected
   for 1.5 s and stored as one queue item.
+- **Downloaded media** follows the same rule: the queue item points at the bot's own reply
+  in your chat, so deleting that reply before it is published breaks the post. A download
+  is capped at 50 MB and at 5 minutes.
 - **Channel discovery** relies on Telegram updates — there is no API to list a bot's chats.
   A channel shows up when the bot is added/promoted or when the first channel post arrives;
   otherwise add it manually in the dashboard.
@@ -191,6 +241,9 @@ Two things worth knowing:
 
 - The container runs as a **non-root user**, so the host directory behind `DATA_DIR`
   must be writable by it (`chown 1000:1000 ./data` covers the usual case).
+- yt-dlp updates itself **inside the container**, so a new release survives only until the
+  container is recreated — after which the image's copy is updated again on the next boot.
+  It is a cache, not state; nothing needs to be persisted for it.
 - `.env` is dockerignored on purpose — compose supplies the environment at runtime, so
   no secret is ever baked into the image.
 
@@ -236,9 +289,9 @@ an ephemeral port.
 ```
 src/server
   api/          Express routes, dashboard auth, snapshot + SSE stream
-  bot/          grammY bot: lifecycle, handlers, album buffer, scheduler
+  bot/          grammY bot: lifecycle, handlers, album buffer, yt-dlp, scheduler
   db/           Drizzle schema and connection
-  services/     settings, users/roles, queue, channels, posting logic
+  services/     settings, users/roles, queue, channels, posting, media tools
   test/         scratch-database helpers for the test suite
 src/web         React dashboard (Vite root)
 drizzle/        generated SQL migrations, applied at boot

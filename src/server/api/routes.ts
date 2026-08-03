@@ -19,6 +19,7 @@ import {
   updateSettings,
   type SettingsPatch,
 } from '../services/settings.js';
+import { updateTools } from '../services/tools.js';
 import {
   ROLES,
   addUser,
@@ -183,6 +184,15 @@ api.delete('/users/:telegramId', async (req, res) => {
   removeUser(telegramId);
   forgetProfile(telegramId);
   res.json({ ok: true, users: await usersWithProfiles() });
+});
+
+/**
+ * Runs the yt-dlp updater now instead of waiting for the daily check. The
+ * response carries the fresh snapshot, so the dashboard needs no second call.
+ */
+api.post('/tools/update', async (_req, res) => {
+  await updateTools();
+  res.json({ ok: true, ...(await buildSnapshot()) });
 });
 
 api.post('/bot/restart', async (_req, res) => {

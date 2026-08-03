@@ -82,4 +82,23 @@ export type Status = {
     queueEmptiesAt: string | null;
   };
   scheduler: { running: boolean; lastTickAt: string | null; lastError: string | null };
+  tools: Tools;
+};
+
+export type ToolStatus = {
+  version: string | null;
+  /** Why the tool is unusable, or null when it answered. */
+  error: string | null;
+};
+
+export type UpdateOutcome = 'updated' | 'up-to-date' | 'unsupported' | 'failed';
+
+/** yt-dlp and ffmpeg — the pair that turns a link into a post. */
+export type Tools = {
+  ytDlp: ToolStatus;
+  ffmpeg: ToolStatus;
+  checkedAt: string | null;
+  updating: boolean;
+  nextCheckAt: string | null;
+  lastUpdate: { at: string; outcome: UpdateOutcome; message: string } | null;
 };

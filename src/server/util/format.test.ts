@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { contentTypeLabel, escapeHtml, formatDuration, formatInTimezone, truncate } from './format.js';
+import {
+  contentTypeLabel,
+  escapeHtml,
+  formatBytes,
+  formatDuration,
+  formatInTimezone,
+  truncate,
+} from './format.js';
 
 describe('formatDuration', () => {
   it('says "now" for anything already due', () => {
@@ -53,6 +60,27 @@ describe('contentTypeLabel', () => {
 
   it('passes unknown types through', () => {
     expect(contentTypeLabel('hologram')).toBe('hologram');
+  });
+});
+
+describe('formatBytes', () => {
+  it('stays in bytes below a kilobyte', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(512)).toBe('512 B');
+  });
+
+  it('rounds kilobytes to whole numbers', () => {
+    expect(formatBytes(2048)).toBe('2 KB');
+    expect(formatBytes(843_000)).toBe('823 KB');
+  });
+
+  it('keeps one decimal from a megabyte up', () => {
+    expect(formatBytes(1_500_000)).toBe('1.4 MB');
+    expect(formatBytes(48.6 * 1024 * 1024)).toBe('48.6 MB');
+  });
+
+  it('drops a pointless decimal on a round size', () => {
+    expect(formatBytes(50 * 1024 * 1024)).toBe('50 MB');
   });
 });
 
