@@ -184,13 +184,15 @@ describe('ensureUsers', () => {
     expect(userCount()).toBe(0);
   });
 
-  it('seeds the ids from the environment on an empty table', async () => {
-    vi.stubEnv('ADMIN_IDS', '100, 200');
-    vi.stubEnv('MANAGER_IDS', '300,100');
+  it('seeds the configured bootstrap ids into an empty table', async () => {
+    const { env } = await import('../env.js');
+    vi.doMock('../env.js', () => ({
+      env: { ...env, initialAdminIds: ['100', '200'], initialManagerIds: ['300', '100'] },
+    }));
     vi.resetModules();
 
-    // Re-imported so env.ts re-reads the stubbed variables. The scratch database
-    // is a file, so the fresh module graph opens the very same one.
+    // Re-imported so it picks up the bootstrap ids. The scratch database is a
+    // file, so the fresh module graph opens the very same one.
     const users = await import('./users.js');
     users.ensureUsers();
 
@@ -200,7 +202,7 @@ describe('ensureUsers', () => {
       .map((u) => `${u.telegramId}:${u.role}`)
       .sort();
     expect(seeded).toEqual(['100:admin', '200:admin', '300:manager']);
-    vi.unstubAllEnvs();
+    vi.doUnmock('../env.js');
     vi.resetModules();
   });
 });

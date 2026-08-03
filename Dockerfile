@@ -36,8 +36,6 @@ RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 FROM base AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
-# SQLite lives on a mounted volume so the queue survives a redeploy.
-ENV DATABASE_PATH=/app/data/app.db
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist

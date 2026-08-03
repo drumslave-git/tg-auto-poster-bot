@@ -7,8 +7,6 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      # The queue, the settings and the post history live in the volume below.
-      DATABASE_PATH: /app/data/app.db
       # Shared secret for every /api call. Leave empty only on a private host.
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       # Bootstrap values, used only the first time the database is created —
@@ -19,8 +17,9 @@ services:
       TZ_NAME: ${TZ_NAME:-UTC}
       TZ: ${TZ:-UTC}
     volumes:
-      # Bind-mounted host directory so the database survives a redeploy. The
-      # container runs as a non-root user, so this path must be writable by it.
+      # The database lives at /app/data/app.db; bind-mounting the directory is
+      # what makes it survive a redeploy. The container runs as a non-root user,
+      # so this path must be writable by it.
       - "${DATA_DIR:-./data}:/app/data"
     healthcheck:
       # 127.0.0.1 (not localhost): the server binds IPv4, and localhost can

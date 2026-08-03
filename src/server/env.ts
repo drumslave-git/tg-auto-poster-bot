@@ -14,7 +14,8 @@ function idList(...values: (string | undefined)[]): string[] {
 
 export const env = {
   port: Number(process.env.PORT ?? 3000),
-  databasePath: path.resolve(cwd, process.env.DATABASE_PATH ?? './data/app.db'),
+  /** Always alongside the app; mount `data/` to keep it across redeploys. */
+  databasePath: path.resolve(cwd, 'data/app.db'),
   /** Optional: when set, every /api call must carry this value. */
   dashboardPassword: process.env.DASHBOARD_PASSWORD?.trim() || null,
   /** Bootstrap values, only used the very first time the DB is created. */
