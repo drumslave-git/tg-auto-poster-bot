@@ -1,6 +1,15 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { syncCommandMenu } from '../bot/commands.js';
 import { botManager } from '../bot/manager.js';
+import { notifyDashboard } from '../events.js';
+import {
+  MAX_WATERMARK_IMAGE_BYTES,
+  hasWatermarkImage,
+  readWatermarkImage,
+  removeWatermarkImage,
+  saveWatermarkImage,
+  watermarkImageProblem,
+} from '../media/watermark.js';
 import { upsertChannel } from '../services/channels.js';
 import { postNext, syncQueueHead } from '../services/poster.js';
 import { clearProfiles, forgetProfile, resolveProfile, usersWithProfiles } from '../services/profiles.js';
@@ -16,10 +25,10 @@ import {
   MAX_DELAY_MINUTES,
   MAX_FOOTER_LENGTH,
   MIN_DELAY_MINUTES,
+  WATERMARK_LIMITS,
   getSettings,
   isValidTelegramId,
   isValidTimezone,
-  postingWindow,
   updateSettings,
   type SettingsPatch,
 } from '../services/settings.js';
@@ -33,8 +42,8 @@ import {
   removeUser,
   setRole,
 } from '../services/users.js';
-import { formatClock, parseClock } from '../util/time.js';
-import { buildSnapshot, maskToken } from './snapshot.js';
+import { parseClock } from '../util/time.js';
+import { buildSnapshot, settingsView } from './snapshot.js';
 import { streamState } from './stream.js';
 
 export const api = Router();
@@ -97,10 +106,26 @@ api.put('/settings', async (req, res) => {
     patch.targetChannelId = value || null;
   }
 
-  for (const key of ['paused', 'queueRawOnFailure', 'downloadMetadata'] as const) {
+  for (const key of [
+    'paused',
+    'queueRawOnFailure',
+    'downloadMetadata',
+    'watermarkEnabled',
+    'watermarkRequired',
+  ] as const) {
     if (!(key in body)) continue;
     if (typeof body[key] !== 'boolean') errors.push(`${key} must be a boolean`);
     else patch[key] = body[key];
+  }
+
+  for (const [key, { min, max }] of Object.entries(WATERMARK_LIMITS)) {
+    if (!(key in body)) continue;
+    const value = Number(body[key]);
+    if (!Number.isInteger(value) || value < min || value > max) {
+      errors.push(`${key} must be an integer between ${min} and ${max}`);
+    } else {
+      patch[key as keyof typeof WATERMARK_LIMITS] = value;
+    }
   }
 
   if ('postFooter' in body) {
@@ -159,25 +184,54 @@ api.put('/settings', async (req, res) => {
     await botManager.apply(updated.botToken);
   }
 
-  const window = postingWindow(updated);
+  res.json({ ok: true, bot: botManager.getState(), settings: settingsView(updated) });
+});
 
-  res.json({
-    ok: true,
-    bot: botManager.getState(),
-    settings: {
-      delayMinutes: updated.delayMinutes,
-      timezone: updated.timezone,
-      targetChannelId: updated.targetChannelId,
-      paused: updated.paused,
-      queueRawOnFailure: updated.queueRawOnFailure,
-      downloadMetadata: updated.downloadMetadata,
-      postFooter: updated.postFooter ?? '',
-      windowStart: window ? formatClock(window.start) : null,
-      windowEnd: window ? formatClock(window.end) : null,
-      hasToken: Boolean(updated.botToken),
-      tokenMask: maskToken(updated.botToken),
-    },
-  });
+// --- Watermark image --------------------------------------------------------
+
+/**
+ * The PNG travels as raw bytes rather than JSON: base64 would inflate it by a
+ * third, and the global 1 MB JSON limit is right for every other request here.
+ * `type: () => true` claims whatever the browser labelled the upload.
+ *
+ * The limit here is only a backstop against something absurd — it is set above
+ * the real ceiling on purpose, so that an upload a little too large is turned
+ * away by `watermarkImageProblem` with a sentence a person can act on, rather
+ * than by the body parser throwing.
+ */
+const watermarkUpload = express.raw({
+  type: () => true,
+  limit: MAX_WATERMARK_IMAGE_BYTES * 2,
+});
+
+api.get('/watermark', async (_req, res) => {
+  if (!hasWatermarkImage()) {
+    res.status(404).json({ error: 'No watermark image is configured.' });
+    return;
+  }
+  // The dashboard fetches this to preview it, so it must not be cached past a
+  // replacement — and it is small enough that re-reading it costs nothing.
+  res.type('image/png').set('Cache-Control', 'no-store').send(await readWatermarkImage());
+});
+
+api.post('/watermark', watermarkUpload, async (req, res) => {
+  const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  const problem = watermarkImageProblem(bytes);
+  if (problem) {
+    res.status(400).json({ error: problem });
+    return;
+  }
+
+  await saveWatermarkImage(bytes);
+  // hasImage lives in the snapshot, so every open dashboard should hear it.
+  notifyDashboard();
+  res.json({ ok: true, bytes: bytes.length });
+});
+
+api.delete('/watermark', async (_req, res) => {
+  const removed = await removeWatermarkImage();
+  if (removed) notifyDashboard();
+  res.status(removed ? 200 : 404).json({ ok: removed });
 });
 
 // --- Users ------------------------------------------------------------------

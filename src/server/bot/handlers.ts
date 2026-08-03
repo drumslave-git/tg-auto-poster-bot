@@ -1,5 +1,6 @@
 import { Bot, type Context, InputFile } from 'grammy';
 import type { Message } from 'grammy/types';
+import type { StampKind } from '../media/watermark.js';
 import { upsertChannel, touchLastPost } from '../services/channels.js';
 import { getSchedule, postNext, syncQueueHead } from '../services/poster.js';
 import { clearQueue, enqueue, queueCount } from '../services/queue.js';
@@ -25,10 +26,12 @@ import { ensureCommandMenu, helpLinesFor } from './commands.js';
 import {
   MAX_DOWNLOAD_BYTES,
   type Download,
+  type MediaKind,
   downloadCaption,
   downloadMedia,
   extractDownloadRequest,
 } from './download.js';
+import { stampDownloadedFile, stampForQueue } from './stamp.js';
 
 const INTRO = [
   'Send me any message — text, photo, video, album, file — and it goes into the queue.',
@@ -114,6 +117,41 @@ function replyTo(message: Message): ReplyTo {
   return {
     reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
   };
+}
+
+/** Only the three kinds that carry a picture can be stamped; the rest cannot. */
+function stampKindOf(kind: MediaKind): StampKind | null {
+  return kind === 'photo' || kind === 'video' || kind === 'animation' ? kind : null;
+}
+
+/**
+ * Everything reaches the queue through here, so the watermark cannot be
+ * side-stepped by sending an album instead of a photo. What actually gets
+ * queued is the stamped copy the bot sent back, not the original.
+ */
+async function queueWithWatermark(ctx: Context, messages: Message[]): Promise<void> {
+  const outcome = await stampForQueue(ctx.api, messages);
+
+  if (outcome.status === 'stamped') {
+    await queueMessages(ctx, outcome.messages);
+    return;
+  }
+
+  if (outcome.status === 'failed') {
+    await ctx.reply(
+      `${
+        outcome.required
+          ? '⚠️ Nothing queued — this could not be watermarked.'
+          : '⚠️ Queued without a watermark — it could not be stamped.'
+      }\n\n<code>${escapeHtml(outcome.error)}</code>`,
+      { parse_mode: 'HTML', ...replyTo(messages[0]!) },
+    );
+    // The watermark was made a condition of posting, so the post does not go on
+    // without it. Nothing is queued and the sender still has their message.
+    if (outcome.required) return;
+  }
+
+  await queueMessages(ctx, messages);
 }
 
 async function sendDownload(
@@ -203,8 +241,37 @@ async function handleLink(
     return;
   }
 
+  // The file is already on disk, so stamping it costs one ffmpeg run and none
+  // of the 20 MB ceiling that applies to media fetched back out of Telegram.
+  const stamped = await stampDownloadedFile(
+    result.download.file,
+    stampKindOf(result.download.kind),
+  );
+
+  if (stamped && !stamped.ok) {
+    // The download itself worked, so this is not a download failure and the
+    // "queue it raw" fallback has nothing to do with it.
+    if (stamped.required) {
+      await result.cleanup().catch(() => undefined);
+      await ctx.reply(
+        `⚠️ Nothing queued — the media came down fine, but it could not be watermarked.\n\n` +
+          `<code>${escapeHtml(stamped.error)}</code>`,
+        { parse_mode: 'HTML', ...replyTo(message) },
+      );
+      return;
+    }
+    await ctx.reply(
+      `⚠️ Posting this without a watermark — it could not be stamped.\n\n` +
+        `<code>${escapeHtml(stamped.error)}</code>`,
+      { parse_mode: 'HTML', ...replyTo(message) },
+    );
+  }
+
+  const download = stamped?.ok ? { ...result.download, file: stamped.file } : result.download;
+
   try {
-    const sent = await sendDownload(ctx, message, url, note, result.download);
+    const sent = await sendDownload(ctx, message, url, note, download);
+    // Already the stamped copy, so it goes to the queue as it is.
     await queueMessages(ctx, [sent]);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -213,6 +280,7 @@ async function handleLink(
     );
   } finally {
     await result.cleanup().catch(() => undefined);
+    if (stamped?.ok) await stamped.cleanup().catch(() => undefined);
   }
 }
 
@@ -399,7 +467,9 @@ export function registerHandlers(bot: Bot): void {
 
     if (message.media_group_id) {
       bufferAlbumMessage(message.media_group_id, message, (messages) => {
-        void queueMessages(ctx, messages).catch((error) => console.error('[bot] album queue failed', error));
+        void queueWithWatermark(ctx, messages).catch((error) =>
+          console.error('[bot] album queue failed', error),
+        );
       });
       return;
     }
@@ -411,7 +481,7 @@ export function registerHandlers(bot: Bot): void {
       return;
     }
 
-    await queueMessages(ctx, [message]);
+    await queueWithWatermark(ctx, [message]);
   });
 
   bot.catch((error) => {

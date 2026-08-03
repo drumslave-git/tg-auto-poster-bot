@@ -311,9 +311,11 @@ function clipEntities(entities: MessageEntity[], length: number): MessageEntity[
  * sender used would be rejected — and a post that cannot be sent sits at the
  * head of the queue failing every minute. Dropping the entity leaves the
  * placeholder character in the text, which is what a client without the set
- * shows anyway. Only the footer paths restate entities; a plain copy keeps them.
+ * shows anyway. Only the paths that restate a caption need this — the footer
+ * ones here, and the watermarked copy the bot sends itself; a plain copy keeps
+ * the original entities untouched.
  */
-function sendableEntities(entities: MessageEntity[]): MessageEntity[] {
+export function sendableEntities(entities: MessageEntity[]): MessageEntity[] {
   return entities.filter((entity) => entity.type !== 'custom_emoji');
 }
 

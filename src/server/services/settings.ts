@@ -53,8 +53,44 @@ export type SettingsPatch = Partial<
     | 'windowEnd'
     | 'queueRawOnFailure'
     | 'downloadMetadata'
+    | 'watermarkEnabled'
+    | 'watermarkX'
+    | 'watermarkY'
+    | 'watermarkOpacity'
+    | 'watermarkScale'
+    | 'watermarkRequired'
   >
 >;
+
+/** The percentage settings the watermark is described by, and their bounds. */
+export const WATERMARK_LIMITS = {
+  watermarkX: { min: 0, max: 100 },
+  watermarkY: { min: 0, max: 100 },
+  // A watermark at 0% opacity is an invisible one, which is what the enable
+  // switch is for; a 0%-wide one is nothing at all.
+  watermarkOpacity: { min: 1, max: 100 },
+  watermarkScale: { min: 1, max: 100 },
+} as const;
+
+/** Where and how the watermark is drawn, independent of whether it is on. */
+export type WatermarkPlacement = {
+  /** 0 = flush left, 50 = centred, 100 = flush right. Same for `y`, vertically. */
+  x: number;
+  y: number;
+  /** 1–100, applied on top of the PNG's own alpha. */
+  opacity: number;
+  /** Watermark width as a percentage of the media's width. */
+  scale: number;
+};
+
+export function watermarkPlacement(settings: Settings): WatermarkPlacement {
+  return {
+    x: settings.watermarkX,
+    y: settings.watermarkY,
+    opacity: settings.watermarkOpacity,
+    scale: settings.watermarkScale,
+  };
+}
 
 /** The hours posting is allowed in, or null when it may happen at any time. */
 export type PostingWindow = { start: number; end: number };

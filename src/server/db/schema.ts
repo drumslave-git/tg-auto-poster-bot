@@ -40,6 +40,33 @@ export const settings = sqliteTable('settings', {
    * the whole caption.
    */
   downloadMetadata: integer('download_metadata', { mode: 'boolean' }).notNull().default(true),
+  /**
+   * Stamp every image and video with `data/watermark.png` before it is posted.
+   * The image itself lives on disk rather than in here: it is the one piece of
+   * configuration measured in megabytes, and the data directory already
+   * survives redeploys.
+   */
+  watermarkEnabled: integer('watermark_enabled', { mode: 'boolean' }).notNull().default(false),
+  /**
+   * Where the watermark sits, as a percentage of the room it has to move in —
+   * so 0 is flush against the left/top edge, 50 is centred, and 100 is flush
+   * against the right/bottom. It can never hang over an edge.
+   */
+  watermarkX: integer('watermark_x').notNull().default(100),
+  watermarkY: integer('watermark_y').notNull().default(100),
+  /** 1–100. 100 is the PNG's own alpha untouched. */
+  watermarkOpacity: integer('watermark_opacity').notNull().default(100),
+  /**
+   * The watermark's width as a percentage of the media's width, so one setting
+   * looks the same on a phone photo and on a 1080p video.
+   */
+  watermarkScale: integer('watermark_scale').notNull().default(20),
+  /**
+   * What to do with media that cannot be stamped — anything past the 20 MB a
+   * bot may download. Off: queue it unwatermarked and say so. On: refuse it,
+   * so nothing reaches the channel without a watermark.
+   */
+  watermarkRequired: integer('watermark_required', { mode: 'boolean' }).notNull().default(false),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
     .notNull()
     .$defaultFn(() => new Date()),

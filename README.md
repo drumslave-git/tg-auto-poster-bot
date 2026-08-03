@@ -242,6 +242,81 @@ is shortened and the footer is kept whole. Posts queued before the footer existe
 their original caption and get the footer as a separate message; there is no record of
 their text to append to.
 
+## Watermarks
+
+Upload a PNG in **Watermark** on the dashboard, switch it on, and every image and video
+that reaches the queue is stamped with it first.
+
+The watermark is applied **as the post arrives**, not as it goes out. Send a photo, and the
+bot sends the stamped copy back to you and queues *that* — so what sits in the queue is
+already what the channel will get. Doing it this way keeps publishing a plain
+`copyMessage`, keeps a download-plus-re-encode off the scheduler's critical path, and means
+a failure is reported to you while you are still in the chat instead of stalling the queue
+head. It also makes a [downloaded link](#links-become-media) nearly free to stamp: that
+file is already on disk.
+
+Four settings shape it, all percentages:
+
+| Setting | What it means |
+| --- | --- |
+| **Horizontal** / **Vertical** | Where it sits, as a share of the room it has to move in: `0` is flush left/top, `50` is centred, `100` is flush right/bottom. The travel is `picture − watermark`, so no value can push it over an edge — `100 / 100` is the bottom-right corner with the whole logo still on the picture. |
+| **Opacity** | 1–100, multiplied into the PNG's own alpha, so transparent margins stay transparent. |
+| **Size** | The watermark's width as a share of the picture's width. One setting then looks the same on a phone photo and on a 1080p video. Anything still too tall to fit is shrunk until it fits. |
+
+The preview beside the sliders runs the same arithmetic the server does, so where the logo
+sits in that 16:9 frame is where ffmpeg will put it.
+
+What gets stamped: **photos, videos and GIFs**. A picture sent as a *file* stays a file, and
+video notes, stickers, audio and text are left alone — stamping those would mean re-sending
+them as something other than what you sent.
+
+### When it cannot be done
+
+A bot may only download 20 MB from Telegram, so media larger than that cannot be reached to
+be stamped at all. (This does not apply to downloaded links, whose file never leaves the
+host.) **Refuse anything that cannot be watermarked** decides what happens then:
+
+- **Off** (default) — the post is queued unstamped and the bot tells you why.
+- **On** — nothing is queued, so nothing reaches the channel without a watermark.
+
+The same choice covers a mixed album (a photo next to a document, which is left alone whole
+rather than half-stamped), a missing or broken ffmpeg, and a re-encode that still comes out
+over the 50 MB a bot may upload.
+
+### Keeping the result uploadable
+
+Stamping re-encodes the video, and constant-quality encoding has no idea how large its
+output will be — a clip that arrived just under the 50 MB limit can easily come back over
+it, at which point it cannot be sent anywhere. So the encoder is given a bitrate ceiling
+worked out from the clip's own duration, targeting 45 MB and leaving the rest as headroom.
+Quality still leads on material that is cheap to encode; the cap only bites on the material
+that would otherwise not fit.
+
+There is a floor to this. Past roughly thirteen minutes the budget would mean a bitrate not
+worth watching, so it stops shrinking — a video that long is refused as too large rather
+than posted as a smear. Short-form video, which is what this feature is for, is nowhere
+near that.
+
+Stamping needs `ffmpeg` and `ffprobe` on `PATH` — both ship in the Docker image, and the
+dashboard's **Media tools** card shows whether ffmpeg answered.
+
+Nothing is ever posted half-stamped. A watermarked file is only sent on once ffmpeg has
+exited cleanly *and* the result has been measured back, because an encode that is cut short
+still leaves the bytes it had already written — an mp4 with no `moov` atom, which Telegram
+accepts and then plays as a black rectangle for however long the caption claims.
+
+### Memory
+
+Watermarking re-encodes video rather than just re-muxing it, which is the heaviest thing
+this app does. `docker-compose.yml` allows **768M** with that in mind; the encode is capped
+at four threads, because x264 otherwise sizes its thread pool from the host's core count —
+which a container's CPU limit does not change — and spends memory on threads it will never
+get to run. Encodes are serialised, so only one runs at a time however busy the chat is.
+A 30-second 1080p clip takes well under a minute.
+
+If you see **"ffmpeg was killed before it finished"** in the chat, that is the kernel's OOM
+killer: give the container more memory.
+
 ## Live dashboard
 
 The dashboard never needs a refresh. It holds one server-sent-events stream open on
@@ -261,11 +336,13 @@ travels in a header instead of the query string.
 
 ## Notes and limitations
 
-- **No media is re-uploaded.** A queued item is a reference to the original message in your
-  chat with the bot; publishing uses `copyMessage` / `copyMessages`. Deleting your original
-  message before it is published will make that item fail to post. (A text post carrying a
-  footer is the one exception — its words are re-sent, because a copy cannot be reworded.
-  Nothing is uploaded either way.)
+- **No media is re-uploaded at publishing time.** A queued item is a reference to the
+  original message in your chat with the bot; publishing uses `copyMessage` /
+  `copyMessages`. Deleting your original message before it is published will make that item
+  fail to post. (A text post carrying a footer is the one exception — its words are re-sent,
+  because a copy cannot be reworded. Nothing is uploaded either way.) With
+  [watermarking](#watermarks) on, the queue points at the stamped copy the bot sent back to
+  you rather than at your original, so that is the message to leave in place.
 - **Albums** are grouped back together: messages sharing a `media_group_id` are collected
   for 1.5 s and stored as one queue item.
 - **Downloaded media** follows the same rule: the queue item points at the bot's own reply
@@ -395,8 +472,9 @@ an ephemeral port.
 ```
 src/server
   api/          Express routes, dashboard auth, snapshot + SSE stream
-  bot/          grammY bot: lifecycle, handlers, command menu, album buffer, yt-dlp, scheduler
+  bot/          grammY bot: lifecycle, handlers, command menu, album buffer, yt-dlp, watermarking, scheduler
   db/           Drizzle schema and connection
+  media/        ffmpeg watermarking: geometry, filter graph, the stored PNG
   services/     settings, users/roles, queue, channels, posting, media tools
   test/         scratch-database helpers for the test suite
 src/web         React dashboard (Vite root)

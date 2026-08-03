@@ -22,18 +22,22 @@ services:
       TZ_NAME: ${TZ_NAME:-UTC}
       TZ: ${TZ:-UTC}
     volumes:
-      # The database lives at /app/data/app.db; bind-mounting the directory is
-      # what makes it survive a redeploy. The container runs as a non-root user,
-      # so this path must be writable by it.
+      # The database lives at /app/data/app.db and the watermark PNG beside it
+      # at /app/data/watermark.png; bind-mounting the directory is what makes
+      # both survive a redeploy. The container runs as a non-root user, so this
+      # path must be writable by it.
       - "${DATA_DIR:-./data}:/app/data"
     # A hard ceiling for the whole container — the server *and* the yt-dlp and
-    # ffmpeg it spawns. Downloading and merging a 50 MB video is the peak; 512M
-    # covers it with room to spare, and the kernel OOM-kills the container if
-    # this is set too low, so lower it only if you have watched it hold.
+    # ffmpeg it spawns. Merging a downloaded 50 MB video is cheap; the real peak
+    # is watermarking, which re-encodes a 1080p video with x264 rather than just
+    # muxing it, so 768M is the figure to start from with that switched on. The
+    # kernel OOM-kills the container if this is too low — and a reaped encode is
+    # exactly how a post ends up a black rectangle — so lower it only if you
+    # have watched it hold.
     deploy:
       resources:
         limits:
-          memory: ${MEMORY_LIMIT:-512M}
+          memory: ${MEMORY_LIMIT:-768M}
           cpus: ${CPU_LIMIT:-2}
     healthcheck:
       # 127.0.0.1 (not localhost): the server binds IPv4, and localhost can

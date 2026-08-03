@@ -52,6 +52,12 @@ export type SettingsPayload = {
   /** `HH:MM`, or `''` to lift the restriction. Both ends travel together. */
   windowStart?: string;
   windowEnd?: string;
+  watermarkEnabled?: boolean;
+  watermarkRequired?: boolean;
+  watermarkX?: number;
+  watermarkY?: number;
+  watermarkOpacity?: number;
+  watermarkScale?: number;
 };
 
 type UsersResponse = { ok: boolean; users: User[] };
@@ -77,4 +83,36 @@ export const apiClient = {
   postNow: () => request<{ ok: boolean; error?: string }>('/post-now', { method: 'POST' }),
   addChannel: (chatId: string) =>
     request<{ ok: boolean }>('/channels', { method: 'POST', body: JSON.stringify({ chatId }) }),
+  uploadWatermark: (file: File) => uploadWatermark(file),
+  /**
+   * The preview cannot be an `<img src="/api/watermark">`: the dashboard
+   * authenticates with a header, which a plain image request cannot carry. So
+   * it is fetched like everything else and handed to the page as a blob URL,
+   * which the caller revokes when it is done with it.
+   */
+  watermarkImageUrl: () => watermarkImageUrl(),
+  removeWatermark: () => request<{ ok: boolean }>('/watermark', { method: 'DELETE' }),
 };
+
+async function uploadWatermark(file: File): Promise<{ ok: boolean; bytes: number }> {
+  // Raw bytes, not JSON — base64 would inflate the PNG by a third for nothing.
+  const response = await fetch('/api/watermark', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', ...authHeaders() },
+    body: file,
+  });
+
+  if (response.status === 401) throw new UnauthorizedError();
+  if (response.status === 413) throw new Error('That PNG is too large.');
+
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) throw new Error(String(body.error ?? `Upload failed (${response.status})`));
+  return body as { ok: boolean; bytes: number };
+}
+
+async function watermarkImageUrl(): Promise<string | null> {
+  const response = await fetch('/api/watermark', { headers: authHeaders() });
+  if (response.status === 401) throw new UnauthorizedError();
+  if (!response.ok) return null;
+  return URL.createObjectURL(await response.blob());
+}

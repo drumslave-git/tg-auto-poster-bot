@@ -75,6 +75,7 @@ export type Status = {
     windowEnd: string | null;
     hasToken: boolean;
     tokenMask: string | null;
+    watermark: Watermark;
   };
   channels: Channel[];
   queue: QueueItem[];
@@ -95,6 +96,23 @@ export type Status = {
   };
   scheduler: { running: boolean; lastTickAt: string | null; lastError: string | null };
   tools: Tools;
+};
+
+/** The PNG stamped onto every image and video, and where it sits. */
+export type Watermark = {
+  enabled: boolean;
+  /** 0 = flush left, 50 = centred, 100 = flush right. Same for `y`, vertically. */
+  x: number;
+  y: number;
+  /** 1–100, on top of the PNG's own transparency. */
+  opacity: number;
+  /** Watermark width as a percentage of the media's width. */
+  scale: number;
+  /** Refuse media that cannot be stamped, rather than posting it unstamped. */
+  required: boolean;
+  hasImage: boolean;
+  /** Changes whenever the PNG is replaced; null when there is none. */
+  imageStamp: number | null;
 };
 
 export type ToolStatus = {

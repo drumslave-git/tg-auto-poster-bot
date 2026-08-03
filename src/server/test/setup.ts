@@ -14,17 +14,24 @@ process.env.MANAGER_IDS = '';
 process.env.TZ_NAME = 'UTC';
 
 /**
- * The database path is fixed in production, so the tests redirect it here
- * rather than through a setting nothing else uses. Setup files run once per
- * test file and vitest gives each file its own module registry, so every file
- * ends up with a private database — and never touches the real ./data/app.db.
+ * Both paths under `data/` are fixed in production, so the tests redirect them
+ * here rather than through a setting nothing else uses. Setup files run once
+ * per test file and vitest gives each file its own module registry, so every
+ * file ends up with a private database and a private watermark — and neither
+ * one ever touches the real ./data.
  *
  * The factory runs when a test file first imports the env module, long after
  * this file has finished evaluating, so reaching `dir` from it is safe.
  */
 vi.mock('../env.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../env.js')>();
-  return { env: { ...actual.env, databasePath: path.join(dir, 'test.db') } };
+  return {
+    env: {
+      ...actual.env,
+      databasePath: path.join(dir, 'test.db'),
+      watermarkPath: path.join(dir, 'watermark.png'),
+    },
+  };
 });
 
 afterAll(() => {

@@ -7,6 +7,7 @@ import { QueuePanel } from './components/QueuePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ToolsPanel } from './components/ToolsPanel';
 import { UsersPanel } from './components/UsersPanel';
+import { WatermarkPanel } from './components/WatermarkPanel';
 import { Badge, Button, Stat } from './components/ui';
 import { subscribeToState } from './events';
 import { formatDateTime, formatRunway } from './format';
@@ -212,6 +213,7 @@ export default function App() {
 
       <QueuePanel status={status} onChanged={() => void refresh()} />
       <SettingsPanel status={status} onSaved={() => void refresh()} />
+      <WatermarkPanel status={status} onSaved={() => void refresh()} />
       <UsersPanel status={status} onChanged={() => void refresh()} />
       <ChannelsPanel status={status} onChanged={() => void refresh()} />
       <ToolsPanel status={status} onChanged={() => void refresh()} />

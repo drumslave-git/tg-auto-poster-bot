@@ -3,6 +3,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './routes.js';
+import { MAX_WATERMARK_IMAGE_BYTES } from '../media/watermark.js';
 import { upsertChannel } from '../services/channels.js';
 import { enqueue, listQueue, postedCount } from '../services/queue.js';
 import { ensureSettings, getSettings } from '../services/settings.js';
@@ -251,6 +252,132 @@ describe('PUT /settings', () => {
     await call('PUT', '/api/settings', { targetChannelId: '' });
 
     expect(getSettings().targetChannelId).toBeNull();
+  });
+
+  it('saves the watermark placement', async () => {
+    const { body } = await call('PUT', '/api/settings', {
+      watermarkEnabled: true,
+      watermarkRequired: true,
+      watermarkX: 0,
+      watermarkY: 50,
+      watermarkOpacity: 40,
+      watermarkScale: 25,
+    });
+
+    expect(body.settings).toMatchObject({
+      watermark: { enabled: true, required: true, x: 0, y: 50, opacity: 40, scale: 25 },
+    });
+    expect(getSettings()).toMatchObject({
+      watermarkEnabled: true,
+      watermarkX: 0,
+      watermarkY: 50,
+      watermarkOpacity: 40,
+      watermarkScale: 25,
+    });
+  });
+
+  it.each([
+    ['watermarkX', 101],
+    ['watermarkY', -1],
+    // Zero opacity is an invisible watermark, which is what the switch is for.
+    ['watermarkOpacity', 0],
+    ['watermarkScale', 0],
+    ['watermarkScale', 12.5],
+  ])('rejects %s of %s', async (key, value) => {
+    const { status, body } = await call('PUT', '/api/settings', { [key]: value });
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(new RegExp(key));
+  });
+});
+
+describe('watermark image', () => {
+  /** A PNG signature is all the server inspects, so this is a valid upload. */
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('pretend pixels'),
+  ]);
+
+  async function upload(bytes: Buffer) {
+    const response = await fetch(`${base}/api/watermark`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: new Uint8Array(bytes),
+    });
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  // The watermark is a file, not a row, so resetting the database does not
+  // clear it — each test has to start with none of its own accord.
+  beforeEach(async () => {
+    await call('DELETE', '/api/watermark');
+  });
+
+  it('has none to begin with', async () => {
+    const { status } = await call('GET', '/api/watermark');
+
+    expect(status).toBe(404);
+    expect((await call('GET', '/api/status')).body).toMatchObject({
+      settings: { watermark: { hasImage: false } },
+    });
+  });
+
+  it('stores a PNG and serves it back byte for byte', async () => {
+    expect(await upload(png)).toMatchObject({ status: 200, body: { ok: true, bytes: png.length } });
+
+    const response = await fetch(`${base}/api/watermark`);
+    expect(response.headers.get('content-type')).toContain('image/png');
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+  });
+
+  it('tells the dashboard it now has one', async () => {
+    await upload(png);
+
+    expect((await call('GET', '/api/status')).body).toMatchObject({
+      settings: { watermark: { hasImage: true } },
+    });
+  });
+
+  it('carries a stamp the preview can watch, so a replacement is noticed', async () => {
+    const stamp = async () => {
+      const { body } = await call('GET', '/api/status');
+      const settings = body.settings as { watermark: { imageStamp: number | null } };
+      return settings.watermark.imageStamp;
+    };
+
+    expect(await stamp()).toBeNull();
+    await upload(png);
+    expect(typeof (await stamp())).toBe('number');
+
+    await call('DELETE', '/api/watermark');
+    expect(await stamp()).toBeNull();
+  });
+
+  it('refuses anything that is not a PNG', async () => {
+    const { status, body } = await upload(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]));
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/PNG/);
+  });
+
+  it('refuses an empty upload', async () => {
+    expect(await upload(Buffer.alloc(0))).toMatchObject({ status: 400 });
+  });
+
+  it('refuses a PNG past the size ceiling with something readable', async () => {
+    const huge = Buffer.concat([png, Buffer.alloc(MAX_WATERMARK_IMAGE_BYTES)]);
+    const { status, body } = await upload(huge);
+
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/at most/i);
+  });
+
+  it('removes the stored one, and says so only the first time', async () => {
+    await upload(png);
+
+    expect(await call('DELETE', '/api/watermark')).toMatchObject({ status: 200 });
+    expect(await call('DELETE', '/api/watermark')).toMatchObject({ status: 404 });
+    expect(await call('GET', '/api/watermark')).toMatchObject({ status: 404 });
   });
 });
 

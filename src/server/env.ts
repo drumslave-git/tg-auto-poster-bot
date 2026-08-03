@@ -33,6 +33,11 @@ export const env = {
   port: Number(process.env.PORT ?? 3000),
   /** Always alongside the app; mount `data/` to keep it across redeploys. */
   databasePath: path.resolve(cwd, 'data/app.db'),
+  /**
+   * The watermark PNG, beside the database so the one mount keeps both. It is
+   * the only setting held as a file: every other one fits in a column.
+   */
+  watermarkPath: path.resolve(cwd, 'data/watermark.png'),
   /** Optional: when set, every /api call must carry this value. */
   dashboardPassword: process.env.DASHBOARD_PASSWORD?.trim() || null,
   /** Bootstrap values, only used the very first time the DB is created. */

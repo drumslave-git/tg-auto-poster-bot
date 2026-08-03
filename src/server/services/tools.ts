@@ -8,6 +8,8 @@ import { truncate } from '../util/format.js';
  */
 export const YT_DLP = 'yt-dlp';
 export const FFMPEG = 'ffmpeg';
+/** Ships in the same package as ffmpeg everywhere; used to measure media. */
+export const FFPROBE = 'ffprobe';
 
 const VERSION_TIMEOUT_MS = 20_000;
 const UPDATE_TIMEOUT_MS = 3 * 60_000;

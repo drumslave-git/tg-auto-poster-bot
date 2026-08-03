@@ -1,18 +1,58 @@
 import { botManager } from '../bot/manager.js';
 import { schedulerState } from '../bot/scheduler.js';
+import type { Settings } from '../db/schema.js';
 import { env } from '../env.js';
+import { hasWatermarkImage, watermarkImageStamp } from '../media/watermark.js';
 import { listChannels } from '../services/channels.js';
 import { getSchedule } from '../services/poster.js';
 import { usersWithProfiles } from '../services/profiles.js';
 import { listQueue, postedCount } from '../services/queue.js';
-import { getSettings } from '../services/settings.js';
+import { getSettings, postingWindow } from '../services/settings.js';
 import { toolsState } from '../services/tools.js';
+import { formatClock } from '../util/time.js';
 import { authRequired } from './auth.js';
 
 export function maskToken(token: string | null): string | null {
   if (!token) return null;
   const [id] = token.split(':');
   return `${id ?? ''}:${'•'.repeat(8)}${token.slice(-4)}`;
+}
+
+/**
+ * The settings as the dashboard sees them. Both the snapshot and the reply to
+ * `PUT /settings` are built from this, so the two can never disagree about what
+ * was just saved.
+ */
+export function settingsView(settings: Settings) {
+  const window = postingWindow(settings);
+
+  return {
+    delayMinutes: settings.delayMinutes,
+    timezone: settings.timezone,
+    targetChannelId: settings.targetChannelId,
+    paused: settings.paused,
+    queueRawOnFailure: settings.queueRawOnFailure,
+    downloadMetadata: settings.downloadMetadata,
+    postFooter: settings.postFooter ?? '',
+    // Clock times rather than minutes: this is what the dashboard's time
+    // inputs speak, and null on either side means "post at any hour".
+    windowStart: window ? formatClock(window.start) : null,
+    windowEnd: window ? formatClock(window.end) : null,
+    hasToken: Boolean(settings.botToken),
+    tokenMask: maskToken(settings.botToken),
+    watermark: {
+      enabled: settings.watermarkEnabled,
+      x: settings.watermarkX,
+      y: settings.watermarkY,
+      opacity: settings.watermarkOpacity,
+      scale: settings.watermarkScale,
+      required: settings.watermarkRequired,
+      /** Without one there is nothing to stamp with, however the rest is set. */
+      hasImage: hasWatermarkImage(),
+      /** Moves when the PNG is replaced, so the preview knows to re-fetch it. */
+      imageStamp: watermarkImageStamp(),
+    },
+  };
 }
 
 /**
@@ -40,21 +80,7 @@ export async function buildSnapshot() {
       id: botState.info?.id ?? null,
     },
     users,
-    settings: {
-      delayMinutes: settings.delayMinutes,
-      timezone: settings.timezone,
-      targetChannelId: settings.targetChannelId,
-      paused: settings.paused,
-      queueRawOnFailure: settings.queueRawOnFailure,
-      downloadMetadata: settings.downloadMetadata,
-      postFooter: settings.postFooter ?? '',
-      // Clock times rather than minutes: this is what the dashboard's time
-      // inputs speak, and null on either side means "post at any hour".
-      windowStart: schedule.window?.start ?? null,
-      windowEnd: schedule.window?.end ?? null,
-      hasToken: Boolean(settings.botToken),
-      tokenMask: maskToken(settings.botToken),
-    },
+    settings: settingsView(settings),
     channels: listChannels(),
     queue: listQueue(),
     stats: {
