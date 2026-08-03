@@ -34,8 +34,17 @@ export function getSettings(): Settings {
 }
 
 export type SettingsPatch = Partial<
-  Pick<Settings, 'botToken' | 'targetChannelId' | 'delayMinutes' | 'timezone'>
+  Pick<Settings, 'botToken' | 'targetChannelId' | 'delayMinutes' | 'timezone' | 'paused'>
 >;
+
+export function isPaused(): boolean {
+  return getSettings().paused;
+}
+
+/** Returns the new state. */
+export function setPaused(paused: boolean): boolean {
+  return updateSettings({ paused }).paused;
+}
 
 export function updateSettings(patch: SettingsPatch): Settings {
   db.update(settings)

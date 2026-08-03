@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { botManager } from '../bot/manager.js';
 import { schedulerState } from '../bot/scheduler.js';
 import { listChannels, upsertChannel } from '../services/channels.js';
-import { getSchedule, postNext } from '../services/poster.js';
+import { getSchedule, postNext, syncQueueHead } from '../services/poster.js';
 import {
   clearQueue,
   listQueue,
@@ -104,6 +104,7 @@ api.get('/status', async (_req, res) => {
       delayMinutes: settings.delayMinutes,
       timezone: settings.timezone,
       targetChannelId: settings.targetChannelId,
+      paused: settings.paused,
       hasToken: Boolean(settings.botToken),
       tokenMask: maskToken(settings.botToken),
     },
@@ -115,6 +116,7 @@ api.get('/status', async (_req, res) => {
       nextPostAt: schedule.nextPostAt?.toISOString() ?? null,
       msRemaining: schedule.msRemaining,
       dueNow: schedule.dueNow,
+      paused: schedule.paused,
       blocked: schedule.blocked,
       targetChannelId: schedule.targetChannelId,
       targetChannelTitle: schedule.targetChannelTitle,
@@ -155,6 +157,11 @@ api.put('/settings', async (req, res) => {
     patch.targetChannelId = value || null;
   }
 
+  if ('paused' in body) {
+    if (typeof body.paused !== 'boolean') errors.push('paused must be a boolean');
+    else patch.paused = body.paused;
+  }
+
   // Absent means "leave unchanged"; empty string means "clear".
   let tokenChanged = false;
   if ('botToken' in body) {
@@ -189,6 +196,7 @@ api.put('/settings', async (req, res) => {
       delayMinutes: updated.delayMinutes,
       timezone: updated.timezone,
       targetChannelId: updated.targetChannelId,
+      paused: updated.paused,
       hasToken: Boolean(updated.botToken),
       tokenMask: maskToken(updated.botToken),
     },
@@ -272,21 +280,30 @@ api.post('/bot/restart', async (_req, res) => {
   res.json({ ok: state.status === 'running', bot: state });
 });
 
+/** Re-mark the queue head after the dashboard changed the queue. */
+async function syncHead(): Promise<void> {
+  const botApi = botManager.getApi();
+  if (botApi) await syncQueueHead(botApi);
+}
+
 api.get('/queue', (_req, res) => {
   res.json({ count: queueCount(), items: listQueue() });
 });
 
-api.delete('/queue', (_req, res) => {
-  res.json({ ok: true, removed: clearQueue() });
+api.delete('/queue', async (_req, res) => {
+  const removed = clearQueue();
+  await syncHead();
+  res.json({ ok: true, removed });
 });
 
-api.delete('/queue/:id', (req, res) => {
+api.delete('/queue/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: 'invalid id' });
     return;
   }
   const removed = removeQueueItem(id);
+  if (removed) await syncHead();
   res.status(removed ? 200 : 404).json({ ok: removed });
 });
 

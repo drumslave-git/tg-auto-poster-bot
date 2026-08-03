@@ -1,12 +1,13 @@
 import { Bot, type Context } from 'grammy';
 import type { Message } from 'grammy/types';
 import { upsertChannel, touchLastPost } from '../services/channels.js';
-import { getSchedule, postNext } from '../services/poster.js';
+import { getSchedule, postNext, syncQueueHead } from '../services/poster.js';
 import { clearQueue, enqueue, queueCount } from '../services/queue.js';
 import {
   MAX_DELAY_MINUTES,
   MIN_DELAY_MINUTES,
   getSettings,
+  setPaused,
   updateSettings,
 } from '../services/settings.js';
 import { getUser, hasNoUsers, roleOf, setLabel } from '../services/users.js';
@@ -36,6 +37,8 @@ const ADMIN_HELP = [
   ...SHARED_COMMANDS,
   '/delay N — set the delay between posts to N minutes',
   '/post — publish the next item right now',
+  '/pause — stop automatic posting',
+  '/resume — start automatic posting again',
   '/clear — empty the queue',
   '/help — this message',
 ].join('\n');
@@ -49,7 +52,7 @@ const MANAGER_HELP = [
   '/help — this message',
   '',
   'You are a manager: you can add posts and check the schedule. Changing the ' +
-    'delay, publishing early and clearing the queue are admin-only.',
+    'delay, publishing early, pausing and clearing the queue are admin-only.',
 ].join('\n');
 
 function isPrivate(ctx: Context): boolean {
@@ -89,6 +92,8 @@ async function queueMessages(ctx: Context, messages: Message[]): Promise<void> {
     contentType,
     preview,
   });
+
+  await syncQueueHead(ctx.api);
 
   const size = queueCount();
   const label = contentTypeLabel(contentType);
@@ -185,10 +190,39 @@ export function registerHandlers(bot: Bot): void {
     );
   });
 
+  bot.command('pause', async (ctx) => {
+    if (!isPrivate(ctx)) return;
+    if (!(await guard(ctx, 'admin'))) return;
+
+    if (getSettings().paused) {
+      await ctx.reply('Posting is already paused. /resume starts it again.');
+      return;
+    }
+    setPaused(true);
+    await ctx.reply(
+      `⏸ Posting paused. I keep collecting posts — <b>${queueCount()}</b> in queue.\n` +
+        'Send /resume to start again.',
+      { parse_mode: 'HTML' },
+    );
+  });
+
+  bot.command('resume', async (ctx) => {
+    if (!isPrivate(ctx)) return;
+    if (!(await guard(ctx, 'admin'))) return;
+
+    if (!getSettings().paused) {
+      await ctx.reply('Posting is already running.');
+      return;
+    }
+    setPaused(false);
+    await replySchedule(ctx, '▶️ Posting resumed.');
+  });
+
   bot.command('clear', async (ctx) => {
     if (!isPrivate(ctx)) return;
     if (!(await guard(ctx, 'admin'))) return;
     const removed = clearQueue();
+    await syncQueueHead(ctx.api);
     await ctx.reply(removed === 0 ? 'Queue was already empty.' : `🗑 Cleared ${removed} queued post${removed === 1 ? '' : 's'}.`);
   });
 

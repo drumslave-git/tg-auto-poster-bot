@@ -11,6 +11,8 @@ export const settings = sqliteTable('settings', {
   targetChannelId: text('target_channel_id'),
   delayMinutes: integer('delay_minutes').notNull().default(60),
   timezone: text('timezone').notNull().default('UTC'),
+  /** While paused the scheduler skips its ticks; manual posting still works. */
+  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
     .notNull()
     .$defaultFn(() => new Date()),

@@ -1,4 +1,4 @@
-import { getSchedule, postNext } from '../services/poster.js';
+import { getSchedule, postNext, syncQueueHead } from '../services/poster.js';
 import { queueCount } from '../services/queue.js';
 import { botManager } from './manager.js';
 
@@ -12,9 +12,13 @@ async function tick(): Promise<void> {
   lastTickAt = new Date();
   const api = botManager.getApi();
   if (!api) return;
+
+  // Also re-marks the head after a restart or a change made outside the bot.
+  await syncQueueHead(api);
   if (queueCount() === 0) return;
 
   const schedule = getSchedule();
+  // Paused schedules are never due; the queue keeps filling in the meantime.
   if (!schedule.dueNow || !schedule.targetChannelId) return;
 
   const result = await postNext(api, 'auto');

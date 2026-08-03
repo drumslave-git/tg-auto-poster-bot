@@ -15,6 +15,13 @@
       "when": 1785747252292,
       "tag": "0001_add_users_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785749024548,
+      "tag": "0002_sparkling_bromley",
+      "breakpoints": true
     }
   ]
 }

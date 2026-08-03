@@ -58,6 +58,7 @@ export type Status = {
     delayMinutes: number;
     timezone: string;
     targetChannelId: string | null;
+    paused: boolean;
     hasToken: boolean;
     tokenMask: string | null;
   };
@@ -69,6 +70,7 @@ export type Status = {
     nextPostAt: string | null;
     msRemaining: number;
     dueNow: boolean;
+    paused: boolean;
     blocked: string | null;
     targetChannelId: string | null;
     targetChannelTitle: string | null;

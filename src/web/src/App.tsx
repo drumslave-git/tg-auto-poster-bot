@@ -6,7 +6,7 @@ import { PasswordGate } from './components/PasswordGate';
 import { QueuePanel } from './components/QueuePanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { UsersPanel } from './components/UsersPanel';
-import { Badge, Stat } from './components/ui';
+import { Badge, Button, Stat } from './components/ui';
 import { formatDateTime, formatRunway } from './format';
 import type { BotStatus, Status } from './types';
 
@@ -28,6 +28,7 @@ export default function App() {
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [pausing, setPausing] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -50,6 +51,21 @@ export default function App() {
     const id = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(id);
   }, [refresh]);
+
+  const togglePaused = useCallback(
+    async (paused: boolean) => {
+      setPausing(true);
+      try {
+        await apiClient.setPaused(paused);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not change the paused state');
+      } finally {
+        setPausing(false);
+      }
+    },
+    [refresh],
+  );
 
   if (locked) return <PasswordGate onSubmit={() => void refresh()} />;
 
@@ -78,9 +94,16 @@ export default function App() {
           <Badge tone={BOT_TONE[bot.status]}>
             {bot.status === 'running' ? `@${bot.username}` : bot.status}
           </Badge>
-          <Badge tone={scheduler.running ? 'green' : 'red'}>
-            scheduler {scheduler.running ? 'on' : 'off'}
+          <Badge tone={settings.paused ? 'amber' : scheduler.running ? 'green' : 'red'}>
+            {settings.paused ? 'paused' : `scheduler ${scheduler.running ? 'on' : 'off'}`}
           </Badge>
+          <Button
+            variant={settings.paused ? 'primary' : 'ghost'}
+            disabled={pausing}
+            onClick={() => void togglePaused(!settings.paused)}
+          >
+            {settings.paused ? '▶ Resume posting' : '⏸ Pause posting'}
+          </Button>
         </div>
       </header>
 
@@ -138,8 +161,8 @@ export default function App() {
         <Stat label="Delay" value={`${settings.delayMinutes} min`} hint={settings.timezone} />
         <Stat
           label="Next post"
-          value={formatDateTime(stats.nextPostAt, settings.timezone)}
-          hint={stats.dueNow ? 'due now' : 'scheduled'}
+          value={settings.paused ? 'Paused' : formatDateTime(stats.nextPostAt, settings.timezone)}
+          hint={settings.paused ? 'resume to schedule' : stats.dueNow ? 'due now' : 'scheduled'}
         />
         <Stat
           label="Queue empties"

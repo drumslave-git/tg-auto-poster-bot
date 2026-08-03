@@ -41,6 +41,7 @@ export type SettingsPayload = {
   targetChannelId?: string;
   delayMinutes?: number;
   timezone?: string;
+  paused?: boolean;
 };
 
 type UsersResponse = { ok: boolean; users: User[] };
@@ -49,6 +50,8 @@ export const apiClient = {
   status: () => request<Status>('/status'),
   saveSettings: (payload: SettingsPayload) =>
     request<{ ok: boolean }>('/settings', { method: 'PUT', body: JSON.stringify(payload) }),
+  setPaused: (paused: boolean) =>
+    request<{ ok: boolean }>('/settings', { method: 'PUT', body: JSON.stringify({ paused }) }),
   restartBot: () => request<{ ok: boolean }>('/bot/restart', { method: 'POST' }),
   addUser: (telegramId: string, role: Role) =>
     request<UsersResponse>('/users', { method: 'POST', body: JSON.stringify({ telegramId, role }) }),

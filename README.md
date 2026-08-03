@@ -61,11 +61,11 @@ on the list is ignored silently.
 | --- | --- | --- |
 | Send posts to the queue | ✅ | ✅ |
 | `/queue`, `/till`, `/summary`, `/help` | ✅ | ✅ |
-| `/delay`, `/post`, `/clear` | ✅ | — |
+| `/delay`, `/post`, `/pause`, `/resume`, `/clear` | ✅ | — |
 | Dashboard | ✅ | — |
 
 Managers are for people who should only feed the queue: they can add content and see when
-it goes out, but cannot change the delay, publish early, or empty the queue. The dashboard
+it goes out, but cannot change the delay, publish early, pause posting, or empty the queue. The dashboard
 itself has no per-user login — it is gated by `DASHBOARD_PASSWORD` and is admin territory,
 so don't hand the password to a manager.
 
@@ -80,12 +80,37 @@ thing standing between you and a bot nobody can configure.
 | `/queue` | How many posts are waiting | any |
 | `/post` | Publish the next queued item immediately | admin |
 | `/till` | Time until the next automatic post | any |
+| `/pause` | Stop automatic posting; the queue keeps filling | admin |
+| `/resume` | Start automatic posting again | admin |
 | `/clear` | Empty the queue | admin |
 | `/summary` | Queue size, next post time, and total runway (queue × delay) | any |
 | `/help` | Command list for your role | any |
 
 Any non-command message is queued, and the bot replies with the new queue size and the
 time until the next post.
+
+## Pausing
+
+`/pause` (or **Pause posting** in the dashboard header) stops the automatic schedule.
+Posts still queue up while paused, the countdown just stops — the dashboard and `/till`
+say so. Publishing by hand still works: `/post` and **Post next now** are deliberate
+actions and override the pause. `/resume` puts the schedule back; since the delay is
+measured from the last message in the channel, a queue that was already overdue goes out
+on the next check.
+
+## Reactions on your messages
+
+The bot reacts to the message you sent it, so the chat itself doubles as a status list:
+
+| Reaction | Meaning |
+| --- | --- |
+| ⚡ | First in the queue — this is the next post to go out |
+| 👍 | Published to the channel |
+| (a reply) | Posting failed; the reply has the error, and the post stays first in the queue for the next attempt |
+
+Telegram only lets bots use a fixed set of reaction emoji, which is why "next up" is ⚡
+rather than ❗. Swap it for any other allowed one in `NEXT_UP_EMOJI`
+(`src/server/services/poster.ts`).
 
 ## How the delay works
 
